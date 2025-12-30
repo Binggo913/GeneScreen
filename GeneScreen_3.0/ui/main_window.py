@@ -469,7 +469,7 @@ class MainWindow(QMainWindow):
 
     def _build_app_icon(self) -> QPixmap:
         size = 20
-        icon_path = Path(__file__).resolve().parent / "resources" / "icons" / "app.png"
+        icon_path = Path(__file__).resolve().parent / "resources" / "icons" / "app.ico"
         if icon_path.exists():
             pixmap = QPixmap(str(icon_path))
             if not pixmap.isNull():
