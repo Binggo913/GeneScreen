@@ -1,0 +1,53 @@
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+
+# ========== 虚拟环境 ==========
+venv/
+.venv/
+env/
+.conda/
+
+# ========== 本地数据（大文件不进仓库） ==========
+GenomesDB/
+GeneScreenOutput/
+
+# ========== 构建产物 ==========
+build/
+dist/
+*.spec
+
+# ========== 测试输出 ==========
+**/test_output/
+**/win_output_*/
+**/output_*/
+
+# ========== 临时文件 ==========
+*.tmp
+*.temp
+*.log
+*.bak
+mamba*
+
+# ========== 数据库 ==========
+*.db
+*.sqlite
+*.sqlite3
+
+# ========== IDE/编辑器 ==========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ========== 系统文件 ==========
+.DS_Store
+Thumbs.db
+desktop.ini

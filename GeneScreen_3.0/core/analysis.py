@@ -1,0 +1,800 @@
+#!/usr/bin/env python3
+"""
+GeneScreen 3.0 - 序列分析模块
+
+整合自 GeneScreen 2.0:
+- SequenceExtractor: 使用 pyfaidx 从参考基因组提取序列
+- BlastAligner: 使用 BLAST+ 进行序列比对和变异检测
+
+改动（相比 2.0）：
+- 移除 CLI 相关代码
+- 添加类型注解
+- 使用 Database 记录分析历史
+"""
+
+import os
+import re
+import subprocess
+from pathlib import Path
+from typing import Optional, Dict, List, Any, Tuple
+
+from pyfaidx import Fasta
+from Bio.Blast import NCBIXML
+
+
+def run_cmd(cmd: str, error_msg: str = "命令执行失败") -> bool:
+    """执行 shell 命令"""
+    print(f"[CMD] {cmd}")
+    result = subprocess.run(cmd, shell=True)
+    if result.returncode != 0:
+        print(f"[ERROR] {error_msg}")
+        return False
+    return True
+
+
+def ensure_blast_db(fasta_path: str) -> bool:
+    """确保 BLAST 数据库存在"""
+    db_file = f"{fasta_path}.nin"
+    if not os.path.exists(db_file):
+        print(f"[INFO] 创建 BLAST 数据库: {fasta_path}")
+        cmd = f'makeblastdb -in "{fasta_path}" -dbtype nucl'
+        if not run_cmd(cmd, "创建 BLAST 数据库失败"):
+            return False
+    return True
+
+
+class SequenceExtractor:
+    """使用 pyfaidx 从参考基因组提取序列"""
+
+    def __init__(self, genome: str, annotation: Optional[str], output_dir: str):
+        self.genome = genome
+        self.annotation = annotation
+        self.output_dir = output_dir
+        self._fasta: Optional[Fasta] = None
+
+    @property
+    def fasta(self) -> Fasta:
+        """懒加载 FASTA 文件"""
+        if self._fasta is None:
+            self._fasta = Fasta(self.genome)
+        return self._fasta
+
+    def extract_by_gene_id(
+        self,
+        gene_id: str,
+        upstream: int = 0,
+        downstream: int = 0
+    ) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+        """通过 Gene ID 提取序列，支持模糊匹配和上下游延伸"""
+        print(f"[INFO] 提取基因 {gene_id} 的序列...")
+        if upstream > 0 or downstream > 0:
+            print(f"[INFO] 上游延伸: {upstream} bp, 下游延伸: {downstream} bp")
+
+        original_gff = os.path.join(self.output_dir, f"{gene_id}.original.gff3")
+        linkview_gff = os.path.join(self.output_dir, f"{gene_id}.linkview.gff3")
+
+        if not self.annotation or not os.path.exists(self.annotation):
+            print(f"[WARNING] 参考基因组无注释文件，Gene ID 模式需要 GFF 注释来定位基因")
+            return None, None, None
+
+        # 使用 ripgrep 过滤 GFF（模糊匹配）
+        cmd = f'rg "{gene_id}" "{self.annotation}" > "{original_gff}"'
+        if not run_cmd(cmd, f"提取 {gene_id} 注释失败"):
+            self._grep_fallback(gene_id, self.annotation, original_gff)
+
+        # 检查是否找到匹配
+        if not os.path.exists(original_gff) or os.path.getsize(original_gff) == 0:
+            print(f"[INFO] 尝试模糊匹配 {gene_id}...")
+            self._fuzzy_grep(gene_id, self.annotation, original_gff)
+
+        gene_info = self._parse_gff_info(original_gff, gene_id)
+        if not gene_info:
+            print(f"[ERROR] 未找到 {gene_id} 的基因记录")
+            return None, None, None
+
+        gene_start = gene_info["start"]
+        gene_end = gene_info["end"]
+        strand = gene_info["strand"]
+        chrom = gene_info["chrom"]
+
+        if strand == "+":
+            theory_start = gene_start - upstream
+            theory_end = gene_end + downstream
+        else:
+            theory_start = gene_start - downstream
+            theory_end = gene_end + upstream
+
+        chrom_normalized = self._normalize_chrom(chrom)
+        chrom_length = len(self.fasta[chrom_normalized])
+        actual_start = max(1, theory_start)
+        actual_end = min(chrom_length, theory_end)
+
+        if actual_start != theory_start or actual_end != theory_end:
+            print(f"[INFO] 边界裁剪: [{theory_start}, {theory_end}] -> [{actual_start}, {actual_end}]")
+
+        gene_rel_start = gene_start - actual_start + 1
+        gene_rel_end = gene_end - actual_start + 1
+
+        self._generate_linkview_gff(gene_id, chrom_normalized, actual_start, actual_end, linkview_gff)
+        fasta_file = self._extract_fasta_region(gene_id, chrom_normalized, actual_start, actual_end)
+
+        extraction_info = {
+            "gene_start": gene_start,
+            "gene_end": gene_end,
+            "gene_rel_start": gene_rel_start,
+            "gene_rel_end": gene_rel_end,
+            "strand": strand,
+            "actual_start": actual_start,
+            "actual_end": actual_end,
+            "upstream": upstream,
+            "downstream": downstream,
+            "chrom": chrom,
+        }
+
+        return fasta_file, linkview_gff, extraction_info
+
+    def _parse_gff_info(self, original_gff: str, gene_id: str) -> Optional[Dict[str, Any]]:
+        """解析 GFF 获取基因信息（chrom, start, end, strand）"""
+        gene_info = None
+        mrna_records = []
+
+        def id_matches(attributes: str, target_id: str) -> bool:
+            match_keys = ("ID", "Parent", "Name", "gene_id", "locus_tag")
+            for attr in attributes.split(";"):
+                if "=" in attr:
+                    key, value = attr.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if key in match_keys:
+                        pattern = r'(^|[,;._:])' + re.escape(target_id) + r'($|[,;._:])'
+                        if re.search(pattern, value):
+                            return True
+            return False
+
+        with open(original_gff, "r") as f:
+            for line in f:
+                if line.startswith("#"):
+                    continue
+                fields = line.strip().split("\t")
+                if len(fields) < 9:
+                    continue
+
+                feature_type = fields[2]
+                attributes = fields[8]
+
+                if not id_matches(attributes, gene_id):
+                    continue
+
+                chrom = fields[0]
+                start = int(fields[3])
+                end = int(fields[4])
+                strand = fields[6] if fields[6] in ["+", "-"] else "+"
+
+                if feature_type == "gene":
+                    gene_info = {
+                        "chrom": chrom,
+                        "start": start,
+                        "end": end,
+                        "strand": strand,
+                    }
+                    break
+                if feature_type == "mRNA":
+                    mrna_records.append({
+                        "chrom": chrom,
+                        "start": start,
+                        "end": end,
+                        "strand": strand,
+                        "range": end - start,
+                    })
+
+        if not gene_info and mrna_records:
+            best_mrna = max(mrna_records, key=lambda x: x["range"])
+            gene_info = {
+                "chrom": best_mrna["chrom"],
+                "start": best_mrna["start"],
+                "end": best_mrna["end"],
+                "strand": best_mrna["strand"],
+            }
+            print(f"[INFO] 未找到 gene 记录，使用 mRNA 记录作为兜底")
+
+        return gene_info
+
+    def _generate_linkview_gff(
+        self,
+        gene_id: str,
+        chrom: str,
+        actual_start: int,
+        actual_end: int,
+        linkview_gff: str
+    ):
+        """从全量 GFF 按坐标区间提取 feature，生成相对坐标的 linkview.gff3"""
+        region_len = actual_end - actual_start + 1
+        allowed_types = {
+            "gene", "mrna", "transcript", "exon", "cds",
+            "five_prime_utr", "three_prime_utr", "intron"
+        }
+
+        def chrom_matches(feat_chrom: str, target_chrom: str) -> bool:
+            if feat_chrom == target_chrom:
+                return True
+            feat_num = re.search(r'(\d+)', feat_chrom)
+            target_num = re.search(r'(\d+)', target_chrom)
+            if feat_num and target_num:
+                return int(feat_num.group(1)) == int(target_num.group(1))
+            return False
+
+        def feature_belongs_to_gene(attributes: str, target_gene_id: str) -> bool:
+            id_match = re.search(r'ID=([^;]+)', attributes)
+            if id_match and target_gene_id in id_match.group(1):
+                return True
+            parent_match = re.search(r'Parent=([^;]+)', attributes)
+            if parent_match and target_gene_id in parent_match.group(1):
+                return True
+            gene_id_match = re.search(r'gene_id=([^;]+)', attributes)
+            if gene_id_match and target_gene_id in gene_id_match.group(1):
+                return True
+            return False
+
+        with open(self.annotation, "r", encoding="utf-8", errors="ignore") as f_in, \
+             open(linkview_gff, "w") as f_out:
+            for line in f_in:
+                if line.startswith("#"):
+                    continue
+                fields = line.strip().split("\t")
+                if len(fields) < 9:
+                    continue
+
+                feat_chrom = fields[0]
+                if not chrom_matches(feat_chrom, chrom):
+                    continue
+
+                feat_type = fields[2]
+                if feat_type.lower() not in allowed_types:
+                    continue
+
+                attributes = fields[8]
+                if not feature_belongs_to_gene(attributes, gene_id):
+                    continue
+
+                feat_start = int(fields[3])
+                feat_end = int(fields[4])
+                if feat_end < actual_start or feat_start > actual_end:
+                    continue
+
+                clipped_start = max(feat_start, actual_start)
+                clipped_end = min(feat_end, actual_end)
+                rel_start = clipped_start - actual_start + 1
+                rel_end = clipped_end - actual_start + 1
+                rel_start = max(1, min(rel_start, region_len))
+                rel_end = max(1, min(rel_end, region_len))
+
+                f_out.write(
+                    f"{gene_id}\t{fields[1]}\t{fields[2]}\t{rel_start}\t{rel_end}\t"
+                    f"{fields[5]}\t{fields[6]}\t{fields[7]}\t{fields[8]}\n"
+                )
+
+    def _extract_fasta_region(self, gene_id: str, chrom: str, start: int, end: int) -> Optional[str]:
+        """提取指定区域的序列"""
+        fasta_file = os.path.join(self.output_dir, f"{gene_id}.fasta")
+        try:
+            seq = self.fasta[chrom][start - 1 : end]
+            with open(fasta_file, "w") as f:
+                f.write(f">{gene_id}\n{str(seq)}\n")
+            print(f"[INFO] 已生成序列文件: {fasta_file} (长度: {len(str(seq))} bp)")
+            return fasta_file
+        except Exception as e:
+            print(f"[ERROR] 提取序列失败: {e}")
+            return None
+
+    def _normalize_chrom(self, chrom: str) -> str:
+        """标准化染色体名称，自动匹配基因组中的实际名称"""
+        available_chroms = list(self.fasta.keys())
+        
+        if chrom in available_chroms:
+            return chrom
+        
+        num_match = re.search(r'(\d+)', chrom)
+        if not num_match:
+            return chrom
+        
+        num = num_match.group(1)
+        num_int = int(num)
+        
+        candidates = [
+            str(num_int), num,
+            f"Chr{num_int}", f"chr{num_int}",
+            f"Chr{num.zfill(2)}", f"chr{num.zfill(2)}",
+            f"Chr{num}", f"chr{num}",
+        ]
+        
+        for candidate in candidates:
+            if candidate in available_chroms:
+                if candidate != chrom:
+                    print(f"[INFO] 染色体名称转换: {chrom} -> {candidate}")
+                return candidate
+        
+        return chrom
+
+    def extract_by_location(
+        self, chrom: str, start: int, end: int, name: Optional[str] = None
+    ) -> Optional[str]:
+        """通过染色体坐标提取序列"""
+        loc_name = name or f"{chrom}_{start}_{end}"
+        print(f"[INFO] 提取区域 {chrom}:{start}-{end} 的序列...")
+
+        chrom = self._normalize_chrom(chrom)
+        fasta_file = os.path.join(self.output_dir, f"{loc_name}.fasta")
+
+        try:
+            seq = self.fasta[chrom][start - 1 : end]
+            with open(fasta_file, "w") as f:
+                f.write(f">{loc_name}\n{str(seq)}\n")
+            print(f"[INFO] 已生成序列文件: {fasta_file}")
+            return fasta_file
+        except Exception as e:
+            print(f"[ERROR] 提取序列失败: {e}")
+            return None
+
+    def _grep_fallback(self, pattern: str, input_file: str, output_file: str):
+        """纯 Python grep 回退"""
+        with open(input_file, "r", encoding="utf-8", errors="ignore") as f_in:
+            with open(output_file, "w") as f_out:
+                for line in f_in:
+                    if pattern in line:
+                        f_out.write(line)
+
+    def _fuzzy_grep(self, gene_id: str, input_file: str, output_file: str):
+        """模糊匹配 Gene ID"""
+        core_match = re.search(r'(Os\d+g\d+)', gene_id, re.IGNORECASE)
+        if not core_match:
+            return
+        
+        core_id = core_match.group(1)
+        print(f"[INFO] 使用核心 ID 搜索: {core_id}")
+        
+        with open(input_file, "r", encoding="utf-8", errors="ignore") as f_in:
+            with open(output_file, "w") as f_out:
+                for line in f_in:
+                    if core_id.lower() in line.lower():
+                        f_out.write(line)
+
+    def _parse_gff(
+        self, original_gff: str, linkview_gff: str, gene_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """解析 GFF 文件"""
+        start_offset = None
+        gene_info = {}
+
+        with open(original_gff, "r") as f_in, open(linkview_gff, "w") as f_out:
+            for line in f_in:
+                if line.startswith("#"):
+                    continue
+                fields = line.strip().split("\t")
+                if len(fields) < 9:
+                    continue
+
+                if start_offset is None:
+                    start_offset = int(fields[3])
+
+                rel_start = int(fields[3]) - start_offset + 1
+                rel_end = int(fields[4]) - start_offset + 1
+                f_out.write(
+                    f"{gene_id}\t{fields[1]}\t{fields[2]}\t{rel_start}\t{rel_end}\t"
+                    f"{fields[5]}\t{fields[6]}\t{fields[7]}\t{fields[8]}\n"
+                )
+
+                if fields[2] == "gene":
+                    gene_info = {
+                        "chrom": fields[0],
+                        "start": int(fields[3]),
+                        "end": int(fields[4]),
+                    }
+
+        if not gene_info:
+            print(f"[ERROR] 未找到 {gene_id} 的 gene 记录")
+            return None
+        return gene_info
+
+    def _extract_fasta(self, gene_id: str, gene_info: Dict[str, Any]) -> Optional[str]:
+        """使用 pyfaidx 提取序列"""
+        fasta_file = os.path.join(self.output_dir, f"{gene_id}.fasta")
+
+        try:
+            chrom = gene_info["chrom"]
+            start = gene_info["start"]
+            end = gene_info["end"]
+            seq = self.fasta[chrom][start - 1 : end]
+
+            with open(fasta_file, "w") as f:
+                f.write(f">{gene_id}\n{str(seq)}\n")
+
+            print(f"[INFO] 已生成序列文件: {fasta_file}")
+            return fasta_file
+        except Exception as e:
+            print(f"[ERROR] 提取序列失败: {e}")
+            return None
+
+
+class BlastAligner:
+    """使用 BLAST+ 进行序列比对"""
+
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+
+    def align(
+        self,
+        reference: str,
+        query: str,
+        prefix_name: str,
+        identity_threshold: float = 90
+    ) -> Optional[Dict[str, str]]:
+        """执行 BLAST 比对"""
+        prefix = os.path.join(self.output_dir, prefix_name)
+
+        if not ensure_blast_db(reference):
+            return None
+
+        xml_file = f"{prefix}.blast.xml"
+        print(f"[INFO] 运行 BLAST 比对...")
+        cmd = (
+            f'blastn -query "{query}" -db "{reference}" '
+            f'-out "{xml_file}" -outfmt 5 '
+            f"-perc_identity {identity_threshold} "
+            f"-num_threads 2"
+        )
+        if not run_cmd(cmd, "BLAST 比对失败"):
+            return None
+
+        coords_file = f"{prefix}.coords"
+        snps_file = f"{prefix}.snps"
+        self._parse_blast_xml(xml_file, coords_file, snps_file)
+
+        print(f"[INFO] 比对完成，结果文件: {coords_file}, {snps_file}")
+        return {
+            "blast_xml": xml_file,
+            "coords": coords_file,
+            "snps": snps_file,
+            "prefix": prefix,
+        }
+
+    def _parse_blast_xml(self, xml_file: str, coords_file: str, snps_file: str):
+        """解析 BLAST XML 输出"""
+        with open(xml_file) as f:
+            blast_records = NCBIXML.parse(f)
+
+            with open(coords_file, "w") as f_coords, open(snps_file, "w") as f_snps:
+                f_coords.write(
+                    "[S1]\t[E1]\t[S2]\t[E2]\t[LEN1]\t[LEN2]\t[%IDY]\t[REF]\t[QUERY]\n"
+                )
+                f_snps.write("[P1]\t[REF]\t[ALT]\t[P2]\t[TYPE]\t[REF_NAME]\t[QUERY_NAME]\n")
+
+                for record in blast_records:
+                    query_name = record.query
+                    for alignment in record.alignments:
+                        ref_name = alignment.hit_def
+                        for hsp in alignment.hsps:
+                            identity = (hsp.identities / hsp.align_length) * 100
+                            f_coords.write(
+                                f"{hsp.sbjct_start}\t{hsp.sbjct_end}\t"
+                                f"{hsp.query_start}\t{hsp.query_end}\t"
+                                f"{abs(hsp.sbjct_end - hsp.sbjct_start) + 1}\t"
+                                f"{abs(hsp.query_end - hsp.query_start) + 1}\t"
+                                f"{identity:.2f}\t{ref_name}\t{query_name}\n"
+                            )
+
+                            variants = self._extract_variants(hsp, ref_name, query_name)
+                            for var in variants:
+                                f_snps.write(
+                                    f"{var['ref_pos']}\t{var['ref']}\t{var['alt']}\t"
+                                    f"{var['query_pos']}\t{var['type']}\t"
+                                    f"{ref_name}\t{query_name}\n"
+                                )
+
+    def _extract_variants(
+        self, hsp, ref_name: str, query_name: str
+    ) -> List[Dict[str, Any]]:
+        """从 HSP 中提取变异"""
+        variants = []
+        ref_pos = hsp.sbjct_start
+        query_pos = hsp.query_start
+        ref_step = 1 if hsp.sbjct_end >= hsp.sbjct_start else -1
+        query_step = 1 if hsp.query_end >= hsp.query_start else -1
+
+        query_seq = hsp.query
+        ref_seq = hsp.sbjct
+
+        i = 0
+        while i < len(query_seq):
+            q_base = query_seq[i]
+            r_base = ref_seq[i]
+
+            if q_base == "-":
+                del_seq = ""
+                while i < len(query_seq) and query_seq[i] == "-":
+                    del_seq += ref_seq[i]
+                    i += 1
+                variants.append({
+                    "ref_pos": ref_pos,
+                    "query_pos": query_pos,
+                    "ref": del_seq,
+                    "alt": "-",
+                    "type": "DEL",
+                })
+                ref_pos += ref_step * len(del_seq)
+                continue
+
+            elif r_base == "-":
+                ins_seq = ""
+                while i < len(ref_seq) and ref_seq[i] == "-":
+                    ins_seq += query_seq[i]
+                    i += 1
+                variants.append({
+                    "ref_pos": ref_pos,
+                    "query_pos": query_pos,
+                    "ref": "-",
+                    "alt": ins_seq,
+                    "type": "INS",
+                })
+                query_pos += query_step * len(ins_seq)
+                continue
+
+            elif q_base != r_base:
+                variants.append({
+                    "ref_pos": ref_pos,
+                    "query_pos": query_pos,
+                    "ref": r_base,
+                    "alt": q_base,
+                    "type": "SNP",
+                })
+
+            ref_pos += ref_step
+            query_pos += query_step
+            i += 1
+
+        return variants
+
+
+
+# ======================= 分析处理器 =======================
+
+class GeneIDProcessor:
+    """Gene ID 模式处理器"""
+
+    def __init__(
+        self,
+        ref_genome: str,
+        ref_annotation: str,
+        query_genome: str,
+        output_dir: str,
+        ref_name: str = "",
+        qry_name: str = "",
+        identity: float = 90,
+        qry_gff: Optional[str] = None,
+        upstream: int = 0,
+        downstream: int = 0,
+        min_aln_len: int = 100
+    ):
+        self.extractor = SequenceExtractor(ref_genome, ref_annotation, output_dir)
+        self.aligner = BlastAligner(output_dir)
+        self.query_genome = query_genome
+        self.output_dir = output_dir
+        self.ref_name = ref_name
+        self.qry_name = qry_name
+        self.identity = identity
+        self.upstream = upstream
+        self.downstream = downstream
+        self.min_aln_len = min_aln_len
+        self.genome_files = {
+            'ref_fasta': ref_genome,
+            'ref_gff': ref_annotation,
+            'qry_fasta': query_genome,
+            'qry_gff': qry_gff
+        }
+
+    def process(self, gene_id: str) -> Optional[Dict[str, Any]]:
+        """处理单个基因"""
+        print(f"\n{'='*50}")
+        print(f"[INFO] 处理基因: {gene_id}")
+        print(f"{'='*50}")
+
+        fasta_file, gff_file, extraction_info = self.extractor.extract_by_gene_id(
+            gene_id, self.upstream, self.downstream
+        )
+        if not fasta_file:
+            return None
+
+        result = self.aligner.align(self.query_genome, fasta_file, gene_id, self.identity)
+        if not result:
+            return None
+
+        result["fasta"] = fasta_file
+        result["gff"] = gff_file
+        result["id"] = gene_id
+        result["output_dir"] = self.output_dir
+        result["mode"] = "gene_id"
+        result["ref_name"] = self.ref_name
+        result["qry_name"] = self.qry_name
+        result["identity"] = self.identity
+        result["min_aln_len"] = self.min_aln_len
+        result["genome_files"] = self.genome_files
+        if extraction_info:
+            result["extraction_info"] = extraction_info
+
+        return result
+
+    def set_output_dir(self, output_dir: str) -> None:
+        self.output_dir = output_dir
+        self.extractor.output_dir = output_dir
+        self.aligner.output_dir = output_dir
+
+
+class LocationProcessor:
+    """Location 模式处理器"""
+
+    def __init__(
+        self,
+        ref_genome: str,
+        query_genome: str,
+        output_dir: str,
+        ref_name: str = "",
+        qry_name: str = "",
+        identity: float = 90,
+        ref_gff: Optional[str] = None,
+        qry_gff: Optional[str] = None,
+        min_aln_len: int = 100
+    ):
+        self.extractor = SequenceExtractor(ref_genome, None, output_dir)
+        self.aligner = BlastAligner(output_dir)
+        self.ref_genome = ref_genome
+        self.query_genome = query_genome
+        self.output_dir = output_dir
+        self.ref_name = ref_name
+        self.qry_name = qry_name
+        self.identity = identity
+        self.min_aln_len = min_aln_len
+        self.genome_files = {
+            'ref_fasta': ref_genome,
+            'qry_fasta': query_genome,
+            'ref_gff': ref_gff,
+            'qry_gff': qry_gff
+        }
+
+    def process(
+        self,
+        chrom: str,
+        start: int,
+        end: int,
+        name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """处理单个区域"""
+        loc_name = name or f"{chrom}_{start}_{end}"
+        print(f"\n{'='*50}")
+        print(f"[INFO] 处理区域: {chrom}:{start}-{end}")
+        print(f"{'='*50}")
+
+        fasta_file = self.extractor.extract_by_location(chrom, start, end, loc_name)
+        if not fasta_file:
+            return None
+
+        result = self.aligner.align(self.query_genome, fasta_file, loc_name, self.identity)
+        if not result:
+            return None
+
+        result["fasta"] = fasta_file
+        result["id"] = loc_name
+        result["location"] = f"{chrom}:{start}-{end}"
+        result["output_dir"] = self.output_dir
+        result["mode"] = "location"
+        result["ref_name"] = self.ref_name
+        result["qry_name"] = self.qry_name
+        result["identity"] = self.identity
+        result["min_aln_len"] = self.min_aln_len
+        result["genome_files"] = self.genome_files
+
+        return result
+
+    def set_output_dir(self, output_dir: str) -> None:
+        self.output_dir = output_dir
+        self.extractor.output_dir = output_dir
+        self.aligner.output_dir = output_dir
+
+
+class SequenceProcessor:
+    """Sequence 模式处理器"""
+
+    def __init__(
+        self,
+        ref_genome: str,
+        output_dir: str,
+        ref_name: str = "",
+        identity: float = 90,
+        ref_gff: Optional[str] = None,
+        min_aln_len: int = 100
+    ):
+        self.aligner = BlastAligner(output_dir)
+        self.ref_genome = ref_genome
+        self.output_dir = output_dir
+        self.ref_name = ref_name
+        self.identity = identity
+        self.min_aln_len = min_aln_len
+        self.genome_files = {
+            'ref_fasta': ref_genome,
+            'ref_gff': ref_gff
+        }
+
+    def process(self, seq_file: str) -> Optional[Dict[str, Any]]:
+        """处理序列文件"""
+        print(f"\n{'='*50}")
+        print(f"[INFO] 处理序列文件: {seq_file}")
+        print(f"{'='*50}")
+
+        seq_id, processed_file = self._prepare_fasta(seq_file)
+
+        sequence = ""
+        with open(processed_file, "r") as f:
+            for line in f:
+                if not line.startswith(">"):
+                    sequence += line.strip()
+
+        result = self.aligner.align(self.ref_genome, processed_file, seq_id, self.identity)
+        if not result:
+            return None
+
+        result["fasta"] = processed_file
+        result["id"] = seq_id
+        result["sequence"] = sequence
+        result["mode"] = "sequence"
+        result["ref_name"] = self.ref_name
+        result["identity"] = self.identity
+        result["min_aln_len"] = self.min_aln_len
+        result["genome_files"] = self.genome_files
+
+        return result
+
+    def process_sequence_text(self, sequence: str, seq_id: str = "query_seq") -> Optional[Dict[str, Any]]:
+        """处理序列文本（GUI 用）"""
+        fasta_file = os.path.join(self.output_dir, f"{seq_id}.fasta")
+        with open(fasta_file, "w") as f:
+            f.write(f">{seq_id}\n{sequence}\n")
+        
+        result = self.aligner.align(self.ref_genome, fasta_file, seq_id, self.identity)
+        if not result:
+            return None
+
+        result["fasta"] = fasta_file
+        result["id"] = seq_id
+        result["sequence"] = sequence
+        result["mode"] = "sequence"
+        result["ref_name"] = self.ref_name
+        result["identity"] = self.identity
+        result["min_aln_len"] = self.min_aln_len
+        result["genome_files"] = self.genome_files
+
+        return result
+
+    def _prepare_fasta(self, seq_file: str) -> Tuple[str, str]:
+        """确保 FASTA 文件有 ID 行"""
+        with open(seq_file, "r") as f:
+            lines = f.readlines()
+
+        has_id = any(line.startswith(">") for line in lines)
+
+        if has_id:
+            seq_id = None
+            for line in lines:
+                if line.startswith(">"):
+                    seq_id = line.strip().lstrip(">").split()[0]
+                    break
+            out_path = os.path.join(self.output_dir, f"{seq_id}.fasta")
+            with open(out_path, "w") as f:
+                f.writelines(lines)
+            return seq_id, out_path
+        else:
+            seq_id = "query_seq"
+            out_path = os.path.join(self.output_dir, f"{seq_id}.fasta")
+            with open(out_path, "w") as f:
+                f.write(f">{seq_id}\n")
+                for line in lines:
+                    if line.strip():
+                        f.write(line)
+            return seq_id, out_path
