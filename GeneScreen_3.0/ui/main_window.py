@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPixmap, QBrush, QPaint
 import math
 import sys
 import ctypes
+from pathlib import Path
 
 from utils.blast_check import check_blast_installation
 
@@ -121,6 +122,7 @@ class MainWindow(QMainWindow):
         self._title_bar_height = 52
         self._dark_mode = False
         self._resize_margin = 6
+        self._resize_cursor_active = False
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         
@@ -467,6 +469,11 @@ class MainWindow(QMainWindow):
 
     def _build_app_icon(self) -> QPixmap:
         size = 20
+        icon_path = Path(__file__).resolve().parent / "resources" / "icons" / "app.png"
+        if icon_path.exists():
+            pixmap = QPixmap(str(icon_path))
+            if not pixmap.isNull():
+                return pixmap.scaled(size, size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
         pixmap = self._create_pixmap(size)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -601,6 +608,19 @@ class MainWindow(QMainWindow):
         if self.isMaximized() or self.isFullScreen():
             return super().eventFilter(obj, event)
 
+        if event.type() == QEvent.MouseMove:
+            if isinstance(obj, QWidget) and (obj is self or self.isAncestorOf(obj)):
+                if hasattr(event, "globalPosition"):
+                    edges = self._hit_test_edges(event.globalPosition().toPoint())
+                    self._update_resize_cursor(edges)
+            return super().eventFilter(obj, event)
+
+        if event.type() in (QEvent.Leave, QEvent.HoverLeave):
+            if self._resize_cursor_active:
+                self.unsetCursor()
+                self._resize_cursor_active = False
+            return super().eventFilter(obj, event)
+
         if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
             if isinstance(obj, QWidget) and (obj is self or self.isAncestorOf(obj)):
                 edges = self._hit_test_edges(event.globalPosition().toPoint())
@@ -628,6 +648,23 @@ class MainWindow(QMainWindow):
         if bottom:
             edges |= Qt.BottomEdge
         return edges
+
+    def _update_resize_cursor(self, edges: Qt.Edges) -> None:
+        if edges == Qt.Edges():
+            if self._resize_cursor_active:
+                self.unsetCursor()
+                self._resize_cursor_active = False
+            return
+        if (edges & Qt.LeftEdge and edges & Qt.TopEdge) or (edges & Qt.RightEdge and edges & Qt.BottomEdge):
+            cursor = Qt.SizeFDiagCursor
+        elif (edges & Qt.RightEdge and edges & Qt.TopEdge) or (edges & Qt.LeftEdge and edges & Qt.BottomEdge):
+            cursor = Qt.SizeBDiagCursor
+        elif edges & (Qt.LeftEdge | Qt.RightEdge):
+            cursor = Qt.SizeHorCursor
+        else:
+            cursor = Qt.SizeVerCursor
+        self.setCursor(cursor)
+        self._resize_cursor_active = True
 
     
     def _create_content_area(self) -> QWidget:

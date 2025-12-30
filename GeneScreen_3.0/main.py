@@ -4,6 +4,7 @@ GeneScreen 3.0 - 基因组比对与变异分析工具
 主程序入口
 """
 import sys
+import ctypes
 from pathlib import Path
 
 from PySide6.QtWidgets import QApplication, QMessageBox, QLabel
@@ -20,6 +21,13 @@ from ui.main_window import MainWindow
 
 def main():
     """主程序入口"""
+    if sys.platform.startswith("win"):
+        try:
+            app_id = "GeneScreen.App"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(app_id)
+        except Exception:
+            pass
+
     # 创建应用
     app = QApplication(sys.argv)
     app.setApplicationName("GeneScreen")
@@ -29,7 +37,8 @@ def main():
     # 设置应用图标
     icon_path = ROOT_DIR / "ui" / "resources" / "icons" / "app.ico"
     if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+        icon = QIcon(str(icon_path))
+        app.setWindowIcon(icon)
 
     # 检查 BLAST+ 是否安装
     if not check_blast():
@@ -75,6 +84,8 @@ def main():
 
     # 创建并显示主窗口
     window = MainWindow()
+    if icon_path.exists():
+        window.setWindowIcon(icon)
     window.show()
 
     # 运行应用

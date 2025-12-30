@@ -407,10 +407,9 @@ class GeneIDPage(QWidget):
     def _on_gene_id_selected(self, text: str):
         if text:
             self.gene_id_input.setCurrentText(text)
-            if self._gene_id_completer and self._gene_id_completer.popup():
-                self._gene_id_completer.popup().hide()
             self.gene_id_input.lineEdit().setReadOnly(False)
             self._last_filter_text = ""
+            QTimer.singleShot(0, self._show_gene_id_popup)
 
     def _show_gene_id_popup(self):
         prefix = self.gene_id_input.lineEdit().text()

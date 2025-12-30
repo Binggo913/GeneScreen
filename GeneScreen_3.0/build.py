@@ -8,6 +8,7 @@ Nuitka 打包脚本 - GeneScreen 3.0
 import subprocess
 import sys
 import platform
+from pathlib import Path
 
 def build():
     is_windows = platform.system() == "Windows"
@@ -26,9 +27,12 @@ def build():
     if is_windows:
         cmd.extend([
             "--windows-console-mode=disable",
-            "--windows-icon-from-ico=ui/resources/icons/app.ico",
             "--output-filename=GeneScreen.exe",
         ])
+        # 图标可选
+        icon_path = Path("ui/resources/icons/app.ico")
+        if icon_path.exists():
+            cmd.append(f"--windows-icon-from-ico={icon_path}")
     else:
         cmd.extend([
             "--static-libpython=no",  # micromamba 兼容
