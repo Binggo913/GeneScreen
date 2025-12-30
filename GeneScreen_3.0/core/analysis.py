@@ -14,18 +14,19 @@ GeneScreen 3.0 - 序列分析模块
 
 import os
 import re
-import subprocess
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 
 from pyfaidx import Fasta
 from Bio.Blast import NCBIXML
 
+from utils import run_subprocess
+
 
 def run_cmd(cmd: str, error_msg: str = "命令执行失败") -> bool:
-    """执行 shell 命令"""
+    """执行 shell 命令（Windows 下隐藏黑窗口）"""
     print(f"[CMD] {cmd}")
-    result = subprocess.run(cmd, shell=True)
+    result = run_subprocess(cmd, shell=True, capture_output=False)
     if result.returncode != 0:
         print(f"[ERROR] {error_msg}")
         return False

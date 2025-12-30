@@ -8,8 +8,8 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
     QCheckBox, QDialog
 )
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QColor
+from PySide6.QtCore import Qt, QUrl, QSize
+from PySide6.QtGui import QDesktopServices, QColor, QIcon, QPalette
 from datetime import datetime, timezone
 import os
 import re
@@ -18,6 +18,7 @@ from pathlib import Path
 
 from core import get_database
 from core.config import get_output_dir
+from ui.utils.icon_utils import draw_sidebar_icon
 
 
 class HistoryPage(QWidget):
@@ -75,6 +76,7 @@ class HistoryPage(QWidget):
         self.history_table.setHorizontalHeaderLabels([
             "", "ID", "模式", "时间", "报告", "结果路径"
         ])
+        self.history_table.setIconSize(QSize(18, 18))
         self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
@@ -210,11 +212,28 @@ class HistoryPage(QWidget):
             
             # 模式
             mode_display = {
-                "gene_id": "🧬 Gene ID",
-                "location": "📍 Location",
-                "sequence": "🔤 Sequence"
+                "gene_id": "Gene ID",
+                "location": "Location",
+                "sequence": "Sequence"
             }.get(mode, mode)
-            self.history_table.setItem(i, 2, QTableWidgetItem(mode_display))
+            mode_item = QTableWidgetItem(mode_display)
+            icon_name = {
+                "gene_id": "id",
+                "location": "pin",
+                "sequence": "code"
+            }.get(mode)
+            if icon_name:
+                icon_color = QColor("#606266")
+                if self.palette().color(QPalette.Base).lightness() < 128:
+                    icon_color = QColor("#c7c9cc")
+                pixmap = draw_sidebar_icon(
+                    icon_name,
+                    icon_color,
+                    size=18,
+                    widget=self
+                )
+                mode_item.setIcon(QIcon(pixmap))
+            self.history_table.setItem(i, 2, mode_item)
             self.history_table.item(i, 2).setFlags(
                 self.history_table.item(i, 2).flags() & ~Qt.ItemIsEditable
             )
@@ -324,14 +343,20 @@ class HistoryPage(QWidget):
         report_path = record.get("report_path", "")
         output_dir = record.get("output_dir", "")
 
-        if column == 4 and report_path and os.path.exists(report_path):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(report_path))
+        if column == 4:
+            if report_path and os.path.exists(report_path):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(report_path))
+                return
+            QMessageBox.warning(self, "提示", "报告文件不存在或未记录")
             return
 
-        if column == 5 and output_dir and os.path.exists(output_dir):
-            QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
-        elif column == 5:
+        if column == 5:
+            if output_dir and os.path.exists(output_dir):
+                QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
+                return
             QMessageBox.warning(self, "提示", "输出目录不存在或未记录")
+            return
+
 
     def closeEvent(self, event):
         if self._db:

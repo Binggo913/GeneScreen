@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import Iterable, List
 
+from utils import run_subprocess
+
 
 GENE_ID_LIST_SUFFIX = ".gene_ids.json"
 LEGACY_LIST_SUFFIX = ".gene_ids.txt"
@@ -113,7 +115,7 @@ def _rg_gene_lines(path: str) -> List[str]:
     if shutil.which("rg") is None:
         return []
     try:
-        result = subprocess.run(
+        result = run_subprocess(
             [
                 "rg",
                 "--no-filename",
@@ -124,8 +126,6 @@ def _rg_gene_lines(path: str) -> List[str]:
                 r"\tpseudogene\t",
                 path,
             ],
-            capture_output=True,
-            text=True,
             timeout=120
         )
         if result.returncode in (0, 1) and result.stdout:

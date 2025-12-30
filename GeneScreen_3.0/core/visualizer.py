@@ -11,6 +11,10 @@ import sys
 import json
 import datetime
 import subprocess
+import sys
+
+# Windows 下隐藏黑窗口
+from utils import run_subprocess
 import base64
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
@@ -595,7 +599,7 @@ class LinkviewVisualizer:
         print(f"[CMD] {cmd_str}")
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_subprocess(cmd)
             if result.returncode != 0:
                 print(f"[WARNING] LINKVIEW 运行失败: {result.stderr}")
                 return None
@@ -1048,7 +1052,7 @@ class LinkviewVisualizer:
         print(f"[CMD] {cmd_str}")
         
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = run_subprocess(cmd)
             if result.returncode != 0:
                 print(f"[WARNING] LINKVIEW 运行失败: {result.stderr}")
                 return None

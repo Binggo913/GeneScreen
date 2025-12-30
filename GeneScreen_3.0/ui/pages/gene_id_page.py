@@ -140,6 +140,7 @@ class GeneIDPage(QWidget):
         self._pending_gene_id_path = ""
         self._gene_id_poll_timer = None
         self._gene_id_poll_path = ""
+        self._suppress_popup = False
         self._auto_output_dir = ""
         self._gene_id_popup_model = QStringListModel([], self)
         self._gene_id_completer = None
@@ -407,9 +408,12 @@ class GeneIDPage(QWidget):
     def _on_gene_id_selected(self, text: str):
         if text:
             self.gene_id_input.setCurrentText(text)
+            if self._gene_id_completer and self._gene_id_completer.popup():
+                self._gene_id_completer.popup().hide()
+            self._suppress_popup = True
+            QTimer.singleShot(200, self._clear_popup_suppress)
             self.gene_id_input.lineEdit().setReadOnly(False)
             self._last_filter_text = ""
-            QTimer.singleShot(0, self._show_gene_id_popup)
 
     def _show_gene_id_popup(self):
         prefix = self.gene_id_input.lineEdit().text()
@@ -424,8 +428,12 @@ class GeneIDPage(QWidget):
     def eventFilter(self, obj, event):
         if obj in (self.gene_id_input, self.gene_id_input.lineEdit()):
             if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.FocusIn):
-                QTimer.singleShot(0, self._show_gene_id_popup)
+                if not self._suppress_popup:
+                    QTimer.singleShot(0, self._show_gene_id_popup)
         return super().eventFilter(obj, event)
+
+    def _clear_popup_suppress(self) -> None:
+        self._suppress_popup = False
 
     def _on_single_gene_id_changed(self, text: str):
         if self._syncing_inputs:
