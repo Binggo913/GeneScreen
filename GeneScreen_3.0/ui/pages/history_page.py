@@ -302,6 +302,8 @@ class HistoryPage(QWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle("确认删除")
         dialog.setMinimumWidth(360)
+        if self.windowIcon():
+            dialog.setWindowIcon(self.windowIcon())
         layout = QVBoxLayout(dialog)
         msg_label = QLabel(f"确定要删除选中的 {len(checked_records)} 条记录吗？")
         layout.addWidget(msg_label)

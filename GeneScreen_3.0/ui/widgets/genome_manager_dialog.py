@@ -97,6 +97,10 @@ class GenomeManagerDialog(QDialog):
         self.setMinimumSize(800, 600)
         self.resize(900, 650)
         
+        # 继承父窗口图标
+        if parent and parent.windowIcon():
+            self.setWindowIcon(parent.windowIcon())
+        
         self._init_ui()
         self._load_genomes()
     
