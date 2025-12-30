@@ -5,15 +5,17 @@
 # ============================================================
 # 使用 micromamba/conda 安装，包含 ripgrep 和 cairo：
 #
-#   micromamba create -f environment.yml
-#   micromamba activate genescreen3
+#   micromamba create -f environment.yml        # Linux/WSL
+#   micromamba create -f environment_windows.yml  # Windows
+#   micromamba activate genescreen
 #
 # ============================================================
 # 打包分发
 # ============================================================
-# PyInstaller 会打包所有依赖（含 ripgrep、cairo）
-# 用户只需手动安装 BLAST+
+# Nuitka 编译成独立可执行文件：
+#   python build.py
 #
+# 用户只需手动安装 BLAST+
 # ============================================================
 
 # GUI 框架
@@ -27,4 +29,6 @@ biopython
 cairosvg
 
 # 打包工具
-pyinstaller
+nuitka
+ordered-set
+zstandard

@@ -1,17 +1,20 @@
-# GeneScreen 3.0 开发环境
+# GeneScreen 3.0 开发环境 (Linux/WSL)
 # 安装: micromamba create -f environment.yml
-# 激活: micromamba activate genescreen3
+# 激活: micromamba activate genescreen
 
-name: genescreen3
+name: genescreen
 channels:
   - conda-forge
 dependencies:
   - python=3.10
   - ripgrep>=14        # GFF 文件搜索
   - cairo              # cairosvg 运行时依赖
+  - patchelf           # Nuitka 打包依赖
   - pip:
     - PySide6>=6.5     # GUI 框架
     - pyfaidx          # FASTA 索引/提取
     - biopython        # BLAST 结果解析
     - cairosvg         # SVG 转 PNG
-    - pyinstaller      # 打包工具
+    - nuitka           # 打包工具
+    - ordered-set      # Nuitka 依赖
+    - zstandard        # Nuitka 压缩

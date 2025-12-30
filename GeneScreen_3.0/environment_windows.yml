@@ -1,10 +1,10 @@
-# GeneScreen 3.0 Windows 开发环境
+# GeneScreen 3.0 开发环境 (Windows)
 # BLAST+ 需要手动安装: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
 #
 # 安装: micromamba create -f environment_windows.yml
-# 激活: micromamba activate genescreen3
+# 激活: micromamba activate genescreen
 
-name: genescreen3
+name: genescreen
 channels:
   - conda-forge
 dependencies:
@@ -16,4 +16,6 @@ dependencies:
     - pyfaidx          # FASTA 索引/提取
     - biopython        # BLAST 结果解析
     - cairosvg         # SVG 转 PNG
-    - pyinstaller      # 打包工具
+    - nuitka           # 打包工具
+    - ordered-set      # Nuitka 依赖
+    - zstandard        # Nuitka 压缩

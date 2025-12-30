@@ -1,6 +1,6 @@
 # GeneScreen 3.0
 
-基因组比对与变异分析工具 - Windows 桌面版
+基因组比对与变异分析工具 - 跨平台桌面版
 
 ## 功能特性
 
@@ -13,7 +13,7 @@
 
 ## 系统要求
 
-- Windows 10/11 (64-bit)
+- Windows 10/11 (64-bit) 或 Linux
 - BLAST+ 2.12+ (需要单独安装)
 
 ## 安装
@@ -32,7 +32,8 @@ blastn -version
 
 ### 2. 运行 GeneScreen
 
-双击 `GeneScreen.exe` 启动程序。
+- **Windows**: 双击 `GeneScreen.exe`
+- **Linux**: 运行 `./GeneScreen`
 
 ## 使用方法
 
@@ -85,7 +86,11 @@ blastn -version
 ### 环境配置
 
 ```bash
-# 使用 micromamba/conda
+# Linux/WSL
+micromamba create -f environment.yml
+micromamba activate genescreen
+
+# Windows
 micromamba create -f environment_windows.yml
 micromamba activate genescreen
 
@@ -101,16 +106,22 @@ python main.py
 
 ### 打包
 
+使用 Nuitka 编译成独立可执行文件：
+
 ```bash
-pyinstaller build/GeneScreen.spec
+python build.py
 ```
+
+脚本会自动识别当前平台（Windows/Linux），生成对应的可执行文件到 `dist/` 目录。
 
 ## 依赖
 
 - PySide6 - GUI 框架
 - pyfaidx - FASTA 索引和序列提取
 - biopython - BLAST 结果解析
+- cairosvg - SVG 转 PNG
 - ripgrep - 快速 GFF 搜索（已打包）
+- nuitka - 打包工具
 
 ## 许可证
 
@@ -118,4 +129,4 @@ MIT License
 
 ## 作者
 
-GeneScreen Team
+xbzhang
