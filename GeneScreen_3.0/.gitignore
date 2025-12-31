@@ -1,0 +1,25 @@
+# 压缩文件
+*.zip
+*.rar
+*.7z
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# 打包输出
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 缓存
+.cache/
+*.log
