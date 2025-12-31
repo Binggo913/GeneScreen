@@ -51,3 +51,9 @@ mamba*
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ========== 压缩文件 ==========
+*.zip
+*.rar
+*.7z
+*.tar.gz
