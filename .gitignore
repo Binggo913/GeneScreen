@@ -46,6 +46,7 @@ mamba*
 # ========== IDE/编辑器 ==========
 .idea/
 .vscode/
+.claude/
 *.swp
 *.swo
 *~
