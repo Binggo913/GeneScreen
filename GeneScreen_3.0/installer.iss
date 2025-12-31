@@ -1,8 +1,8 @@
-; GeneScreen 3.0 Inno Setup 脚本
+; GeneScreen 1.0.0 Inno Setup 脚本
 ; 用法: 用 Inno Setup Compiler 编译此文件生成 setup.exe
 
 #define MyAppName "GeneScreen"
-#define MyAppVersion "3.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "xbzhang"
 #define MyAppExeName "GeneScreen.exe"
 
@@ -16,7 +16,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 ; 输出目录和文件名
 OutputDir=dist
-OutputBaseFilename=GeneScreen_Setup_{#MyAppVersion}
+OutputBaseFilename=GeneScreen_Setup
 ; 图标（可选）
 ; SetupIconFile=ui\resources\icons\app.ico
 Compression=lzma2

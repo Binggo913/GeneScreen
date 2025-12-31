@@ -85,7 +85,7 @@ def build_installer():
     
     print(f"\n使用 Inno Setup 生成安装包...")
     subprocess.run([iscc, str(iss_file)], check=True)
-    print("\n安装包生成完成！输出: dist/GeneScreen_Setup_3.0.exe")
+    print("\n安装包生成完成！输出: dist/GeneScreen_Setup.exe")
     return True
 
 

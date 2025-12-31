@@ -41,7 +41,7 @@ def main():
     # 创建应用
     app = QApplication(sys.argv)
     app.setApplicationName("GeneScreen")
-    app.setApplicationVersion("3.0")
+    app.setApplicationVersion("1.0.0")
     app.setOrganizationName("GeneScreen")
 
     # 设置应用图标
