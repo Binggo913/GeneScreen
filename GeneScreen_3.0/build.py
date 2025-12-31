@@ -16,10 +16,13 @@ def build():
     cmd = [
         sys.executable, "-m", "nuitka",
         "--standalone",
-        "--onefile",
+        # "--onefile",  # 目录模式更快启动
         "--enable-plugin=pyside6",
         "--output-dir=dist",
         "--include-data-dir=ui/resources=ui/resources",
+        # LINKVIEW.py 作为外部脚本需要单独打包（subprocess 调用）
+        "--include-data-files=core/LINKVIEW.py=core/LINKVIEW.py",
+        "--include-data-files=core/interval.py=core/interval.py",
         "--assume-yes-for-downloads",
         "--remove-output",
     ]

@@ -20,6 +20,33 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
 
+def _get_linkview_path() -> str:
+    """
+    获取 LINKVIEW.py 的路径，兼容开发环境和 Nuitka 打包后的环境
+    
+    Nuitka 打包后 __file__ 指向虚拟路径，需要使用 sys.executable 定位
+    """
+    # 方案1：尝试从 __file__ 获取（开发环境）
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    linkview_path = os.path.join(script_dir, "LINKVIEW.py")
+    if os.path.exists(linkview_path):
+        return linkview_path
+    
+    # 方案2：Nuitka 打包后，从 exe 所在目录的 core/ 子目录查找
+    exe_dir = os.path.dirname(sys.executable)
+    linkview_path = os.path.join(exe_dir, "core", "LINKVIEW.py")
+    if os.path.exists(linkview_path):
+        return linkview_path
+    
+    # 方案3：从 exe 同级目录查找（如果 LINKVIEW.py 被放在 exe 旁边）
+    linkview_path = os.path.join(exe_dir, "LINKVIEW.py")
+    if os.path.exists(linkview_path):
+        return linkview_path
+    
+    # 都找不到，返回原始路径（让后续代码报错）
+    return os.path.join(script_dir, "LINKVIEW.py")
+
+
 # ============================================================
 # 数据结构定义
 # ============================================================
@@ -569,9 +596,8 @@ class LinkviewVisualizer:
         if not linkview_input:
             return None
         
-        # 获取同目录下的 LINKVIEW.py 路径
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        linkview_path = os.path.join(script_dir, "LINKVIEW.py")
+        # 获取 LINKVIEW.py 路径（兼容开发环境和 Nuitka 打包）
+        linkview_path = _get_linkview_path()
         
         # 构建 LINKVIEW 命令 (使用 -t 2 nucmer coords 格式)
         # 使用 sys.executable 确保在虚拟环境和打包场景下调用正确的 Python 解释器
@@ -1025,8 +1051,8 @@ class LinkviewVisualizer:
         output_svg = f"{output_prefix}.svg"
         output_png = f"{output_prefix}.png"
         
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        linkview_path = os.path.join(script_dir, "LINKVIEW.py")
+        # 获取 LINKVIEW.py 路径（兼容开发环境和 Nuitka 打包）
+        linkview_path = _get_linkview_path()
         
         # 使用 sys.executable 确保在虚拟环境和打包场景下调用正确的 Python 解释器
         cmd = [
