@@ -224,7 +224,7 @@ class LocationPage(QWidget):
 
     def _default_output_dir(self) -> str:
         base = get_output_dir()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(str(base), "Location", timestamp)
 
     def _set_default_output_dir(self):
