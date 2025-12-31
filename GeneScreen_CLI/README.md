@@ -176,15 +176,25 @@ python bin/GeneScreen.py -ref Nippon -seq query.fasta -o output/
 
 ## 三、比对参数
 
-BLAST 使用 identity 阈值过滤比对结果：
-
 ```bash
-# 默认 90% identity
+# 默认参数
 python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -o output/
 
-# 自定义 identity 阈值
-python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -o output/ --identity 95
+# 自定义 identity 阈值（默认 90%）
+python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 --identity 95 -o output/
+
+# 自定义最小比对长度（默认 100bp）
+python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 --min-aln-len 200 -o output/
+
+# 自定义合并间距（默认 1000bp）
+python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 --merge-gap 500 -o output/
 ```
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--identity` | 最小 identity 阈值 (%) | 90 |
+| `--min-aln-len` | 最小比对长度阈值 (bp)，过滤短比对块 | 100 |
+| `--merge-gap` | 合并间距阈值 (bp)，间距小于此值的比对块合并为一组 | 1000 |
 
 ---
 
@@ -215,5 +225,7 @@ python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -o output/ --
 | `-d` / `--downstream` | 下游延伸长度（bp） | 模式1 可选 |
 | `-loc` | 位置文件或区域字符串 | 模式2 |
 | `-seq` | 序列文件 | 模式3 |
-| `--identity` | 最小 identity 阈值 | 可选 |
+| `--identity` | 最小 identity 阈值 (%)，默认 90 | 可选 |
+| `--min-aln-len` | 最小比对长度 (bp)，默认 100 | 可选 |
+| `--merge-gap` | 合并间距阈值 (bp)，默认 1000 | 可选 |
 | `-o` | 输出目录 | ✓ |
