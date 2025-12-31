@@ -678,22 +678,41 @@ class MainWindow(QMainWindow):
         self.page_stack = QStackedWidget()
         self.page_stack.setObjectName("pageStack")
         
-        # 导入并添加实际页面
-        from ui.pages import GeneIDPage, LocationPage, SequencePage, HistoryPage, GenomeManagerPage, SettingsPage
+        # 懒加载页面（先只创建第一个，其他用占位符）
+        from ui.pages import GeneIDPage
         
-        self.page_stack.addWidget(GeneIDPage())
-        self.page_stack.addWidget(LocationPage())
-        self.page_stack.addWidget(SequencePage())
-        self.page_stack.addWidget(HistoryPage())
-        self.page_stack.addWidget(GenomeManagerPage())
-        self.page_stack.addWidget(SettingsPage())
+        self._page_classes = None  # 延迟导入
+        self._pages_loaded = [True, False, False, False, False, False]
+        
+        self.page_stack.addWidget(GeneIDPage())  # 首页立即加载
+        for _ in range(5):  # 其他页面用占位符
+            self.page_stack.addWidget(QWidget())
         
         layout.addWidget(self.page_stack)
         
         return content
     
+    def _ensure_page_loaded(self, index: int):
+        """确保页面已加载（懒加载）"""
+        if self._pages_loaded[index]:
+            return
+        
+        # 延迟导入页面类
+        if self._page_classes is None:
+            from ui.pages import GeneIDPage, LocationPage, SequencePage, HistoryPage, GenomeManagerPage, SettingsPage
+            self._page_classes = [GeneIDPage, LocationPage, SequencePage, HistoryPage, GenomeManagerPage, SettingsPage]
+        
+        # 替换占位符为实际页面
+        old_widget = self.page_stack.widget(index)
+        new_widget = self._page_classes[index]()
+        self.page_stack.removeWidget(old_widget)
+        old_widget.deleteLater()
+        self.page_stack.insertWidget(index, new_widget)
+        self._pages_loaded[index] = True
+    
     def _switch_page(self, index: int):
         """切换页面"""
+        self._ensure_page_loaded(index)
         self.page_stack.setCurrentIndex(index)
         
         # 更新按钮状态

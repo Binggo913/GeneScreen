@@ -7,8 +7,14 @@ from fractions import Fraction
 import sys
 import os
 import random
-import interval
-import cairosvg
+try:
+    from . import interval  # 相对导入（作为包的一部分）
+except ImportError:
+    import interval  # 绝对导入（命令行直接运行时）
+
+# 全局变量（供 Chro 类等使用）
+args = None
+scale = None
 
 style_css = {
     'classic': '''
@@ -215,8 +221,11 @@ def parse_gff(gffs):
     for gff in gffs:
         parse_single_gff(gff)
 
-def main(args):
-
+def main(args_input):
+    # 将参数设为全局变量，供 Chro 类等使用
+    global args
+    args = args_input
+    
     global scale
     global gene_info
     gene_info = {}
@@ -930,13 +939,6 @@ def main(args):
     O = open(args.output + '.svg', 'w')
     O.write(svg_content)
     O.close()
-    if args.svg2png == 'inkscape':
-        os.system('inkscape --file {0}.svg --export-png {0}.png --export-background white --export-dpi {1}'.format(args.output, args.svg2png_dpi))   
-    elif args.svg2png == 'cairosvg':
-        cairosvg.svg2png(url=f'{args.output}.svg',
-                     write_to=f'{args.output}.png',
-                     dpi=args.svg2png_dpi,
-                     background_color='white')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

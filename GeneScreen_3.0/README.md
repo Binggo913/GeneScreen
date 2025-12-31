@@ -119,7 +119,6 @@ python build.py
 - PySide6 - GUI 框架
 - pyfaidx - FASTA 索引和序列提取
 - biopython - BLAST 结果解析
-- cairosvg - SVG 转 PNG
 - ripgrep - 快速 GFF 搜索（已打包）
 - nuitka - 打包工具
 

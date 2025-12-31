@@ -20,11 +20,98 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
 
+def _is_frozen() -> bool:
+    """判断是否在打包环境中运行"""
+    # Nuitka 打包后 sys.executable 指向 exe 文件
+    return getattr(sys, 'frozen', False) or sys.executable.endswith('.exe')
+
+
+def _get_python_executable() -> str:
+    """
+    获取 Python 解释器路径
+    
+    打包后 sys.executable 指向 exe，需要查找系统 Python
+    """
+    if not _is_frozen():
+        return sys.executable
+    
+    # 打包环境：查找系统 Python
+    import shutil
+    
+    # 优先查找 python3，然后 python
+    for name in ['python3', 'python', 'python.exe']:
+        path = shutil.which(name)
+        if path:
+            return path
+    
+    # 兜底：返回 python（让系统 PATH 解析）
+    return 'python'
+
+
+def _run_linkview_direct(input_file: str, output_prefix: str, 
+                         k_file: str = None, hl_file: str = None, gff_file: str = None,
+                         min_identity: float = 90.0, min_aln_len: int = 100) -> bool:
+    """
+    直接调用 LINKVIEW 模块（不走 subprocess）
+    
+    解决打包后用户电脑没有 Python 的问题
+    """
+    try:
+        # 动态导入 LINKVIEW
+        try:
+            from . import LINKVIEW  # 相对导入（作为包的一部分）
+        except ImportError:
+            from core import LINKVIEW  # 绝对导入（兜底）
+        import argparse
+        
+        # 构造 args 对象（模拟命令行参数）
+        args = argparse.Namespace(
+            input=input_file,
+            type=2,  # nucmer coords 格式
+            output=output_prefix,
+            karyotype=k_file,
+            highlight=hl_file,
+            gff=gff_file,
+            min_identity=min_identity,
+            min_alignment_length=min_aln_len,
+            svg_height=400,
+            svg_width=1200,
+            svg_space=0.2,
+            chro_thickness=15,
+            label_font_size=18,
+            label_angle=0,
+            chro_axis=True,
+            chro_axis_density=2,
+            show_pos_with_label=True,
+            bezier=True,
+            style='simple',
+            svg2png='cairosvg',
+            svg2png_dpi=350,
+            no_label=False,
+            no_dash=False,
+            no_scale=False,
+            hl_min1px=False,
+            scale=None,
+            gap_length=0.2,
+            chro_len=None,
+            parameter=None,
+            max_evalue=1e-5,
+            min_bit_score=5000,
+        )
+        
+        # LINKVIEW.main 会将 args 设为全局变量
+        LINKVIEW.main(args)
+        return True
+    except Exception as e:
+        print(f"[ERROR] LINKVIEW 直接调用失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def _get_linkview_path() -> str:
     """
     获取 LINKVIEW.py 的路径，兼容开发环境和 Nuitka 打包后的环境
-    
-    Nuitka 打包后 __file__ 指向虚拟路径，需要使用 sys.executable 定位
     """
     # 方案1：尝试从 __file__ 获取（开发环境）
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -38,12 +125,12 @@ def _get_linkview_path() -> str:
     if os.path.exists(linkview_path):
         return linkview_path
     
-    # 方案3：从 exe 同级目录查找（如果 LINKVIEW.py 被放在 exe 旁边）
+    # 方案3：从 exe 同级目录查找
     linkview_path = os.path.join(exe_dir, "LINKVIEW.py")
     if os.path.exists(linkview_path):
         return linkview_path
     
-    # 都找不到，返回原始路径（让后续代码报错）
+    # 都找不到，返回原始路径
     return os.path.join(script_dir, "LINKVIEW.py")
 
 
@@ -584,7 +671,7 @@ class LinkviewVisualizer:
     
     def run_linkview(self, gene_id, coords_file, gff_file, k_file, hl_file, output_prefix, fasta_file):
         """
-        运行 LINKVIEW.py 生成可视化图
+        运行 LINKVIEW.py 生成可视化图（优先直接调用，无需系统 Python）
         
         返回生成的图片路径（SVG 或 PNG）
         """
@@ -596,56 +683,28 @@ class LinkviewVisualizer:
         if not linkview_input:
             return None
         
-        # 获取 LINKVIEW.py 路径（兼容开发环境和 Nuitka 打包）
-        linkview_path = _get_linkview_path()
+        # 直接调用 LINKVIEW 模块（不走 subprocess，打包后也能用）
+        print(f"[INFO] 调用 LINKVIEW: {linkview_input} -> {output_prefix}")
+        success = _run_linkview_direct(
+            input_file=linkview_input,
+            output_prefix=output_prefix,
+            k_file=k_file,
+            hl_file=hl_file,
+            gff_file=gff_file if gff_file and os.path.exists(gff_file) else None,
+            min_identity=self.min_identity,
+            min_aln_len=self.min_aln_len
+        )
         
-        # 构建 LINKVIEW 命令 (使用 -t 2 nucmer coords 格式)
-        # 使用 sys.executable 确保在虚拟环境和打包场景下调用正确的 Python 解释器
-        cmd = [
-            sys.executable, linkview_path,
-            "-t", "2",
-            linkview_input,
-            "-k", k_file,
-            "-hl", hl_file,
-            "-o", output_prefix,
-            "--min_identity", str(self.min_identity),
-            "--min_alignment_length", str(self.min_aln_len),
-            "--svg_height", "400",
-            "--chro_axis",
-            "--bezier",
-            "-s",
-            "--style", "simple"
-        ]
-        
-        # 只有存在 GFF 文件时才添加 -g 参数
-        if gff_file and os.path.exists(gff_file):
-            cmd.extend(["-g", gff_file])
-        
-        cmd_str = " ".join(cmd)
-        print(f"[CMD] {cmd_str}")
-        
-        try:
-            result = run_subprocess(cmd)
-            if result.returncode != 0:
-                print(f"[WARNING] LINKVIEW 运行失败: {result.stderr}")
-                return None
-            
-            # 检查输出文件
+        if success:
             if os.path.exists(output_svg):
                 print(f"[INFO] LINKVIEW 生成 SVG: {output_svg}")
                 return output_svg
             elif os.path.exists(output_png):
                 print(f"[INFO] LINKVIEW 生成 PNG: {output_png}")
                 return output_png
-            else:
-                print(f"[WARNING] LINKVIEW 未生成图片文件")
-                return None
-        except FileNotFoundError:
-            print(f"[WARNING] LINKVIEW.py 未找到: {linkview_path}")
-            return None
-        except Exception as e:
-            print(f"[WARNING] LINKVIEW 运行异常: {e}")
-            return None
+        
+        print(f"[WARNING] LINKVIEW 未生成图片文件")
+        return None
     
     def generate_visualization(self, gene_id, fasta_file, coords_file, snps_file, gff_file) -> VisualizationResult:
         """
@@ -1047,57 +1106,32 @@ class LinkviewVisualizer:
     
     def _run_linkview_with_input(self, linkview_input: str, gff_file: str,
                                   k_file: str, hl_file: str, output_prefix: str) -> Optional[str]:
-        """使用指定的输入文件运行 LINKVIEW"""
+        """使用指定的输入文件运行 LINKVIEW（优先直接调用，无需系统 Python）"""
         output_svg = f"{output_prefix}.svg"
         output_png = f"{output_prefix}.png"
         
-        # 获取 LINKVIEW.py 路径（兼容开发环境和 Nuitka 打包）
-        linkview_path = _get_linkview_path()
+        # 直接调用 LINKVIEW 模块（不走 subprocess，打包后也能用）
+        print(f"[INFO] 调用 LINKVIEW: {linkview_input} -> {output_prefix}")
+        success = _run_linkview_direct(
+            input_file=linkview_input,
+            output_prefix=output_prefix,
+            k_file=k_file,
+            hl_file=hl_file,
+            gff_file=gff_file if gff_file and os.path.exists(gff_file) else None,
+            min_identity=self.min_identity,
+            min_aln_len=self.min_aln_len
+        )
         
-        # 使用 sys.executable 确保在虚拟环境和打包场景下调用正确的 Python 解释器
-        cmd = [
-            sys.executable, linkview_path,
-            "-t", "2",
-            linkview_input,
-            "-k", k_file,
-            "-hl", hl_file,
-            "-o", output_prefix,
-            "--min_identity", str(self.min_identity),
-            "--min_alignment_length", str(self.min_aln_len),
-            "--svg_height", "400",
-            "--chro_axis",
-            "--bezier",
-            "-s",
-            "--style", "simple"
-        ]
-        
-        if gff_file and os.path.exists(gff_file):
-            cmd.extend(["-g", gff_file])
-        
-        cmd_str = " ".join(cmd)
-        print(f"[CMD] {cmd_str}")
-        
-        try:
-            result = run_subprocess(cmd)
-            if result.returncode != 0:
-                print(f"[WARNING] LINKVIEW 运行失败: {result.stderr}")
-                return None
-            
+        if success:
             if os.path.exists(output_svg):
                 print(f"[INFO] LINKVIEW 生成 SVG: {output_svg}")
                 return output_svg
             elif os.path.exists(output_png):
                 print(f"[INFO] LINKVIEW 生成 PNG: {output_png}")
                 return output_png
-            else:
-                print(f"[WARNING] LINKVIEW 未生成图片文件")
-                return None
-        except FileNotFoundError:
-            print(f"[WARNING] LINKVIEW.py 未找到: {linkview_path}")
-            return None
-        except Exception as e:
-            print(f"[WARNING] LINKVIEW 运行异常: {e}")
-            return None
+        
+        print(f"[WARNING] LINKVIEW 未生成图片文件")
+        return None
 
 class BaseVisualizer:
     """可视化基类"""

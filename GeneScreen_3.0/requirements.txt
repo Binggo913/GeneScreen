@@ -25,9 +25,6 @@ PySide6>=6.5
 pyfaidx
 biopython
 
-# 可视化（SVG 转 PNG）
-cairosvg
-
 # 打包工具
 nuitka
 ordered-set

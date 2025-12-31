@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QComboBox, QCompleter, QAbstractSpinBox
+    QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -157,6 +157,8 @@ class GeneIDPage(QWidget):
         self._report_worker = None
         self._active_report_job = None
         self._pending_finish_message = ""
+        # 防抖定时器
+        self._debounce_timer = None
         self._init_ui()
     
     def _init_ui(self):
@@ -186,34 +188,29 @@ class GeneIDPage(QWidget):
         input_group = QGroupBox("输入")
         input_layout = QVBoxLayout(input_group)
         
-        # Gene ID 输入
+        # Gene ID 输入（用 QLineEdit + 独立弹窗列表）
         id_layout = QHBoxLayout()
         id_label = QLabel("Gene ID:")
         id_label.setMinimumWidth(80)
         id_layout.addWidget(id_label)
         
-        self.gene_id_input = QComboBox()
-        self.gene_id_input.setEditable(True)
-        self.gene_id_input.setInsertPolicy(QComboBox.NoInsert)
+        self.gene_id_input = QLineEdit()
         self.gene_id_input.setMinimumHeight(36)
         self.gene_id_input.setProperty("paramInput", True)
-        self.gene_id_input.lineEdit().setPlaceholderText("请选择或输入基因 ID")
-        self._gene_id_popup_model.setStringList([""])
-        self.gene_id_input.setModel(self._gene_id_popup_model)
-        self._gene_id_completer = QCompleter(self._gene_id_popup_model, self.gene_id_input)
-        self._gene_id_completer.setCaseSensitivity(Qt.CaseInsensitive)
-        self._gene_id_completer.setFilterMode(Qt.MatchContains)
-        self._gene_id_completer.setCompletionMode(QCompleter.PopupCompletion)
-        self._gene_id_completer.setMaxVisibleItems(12)
-        self._gene_id_completer.activated.connect(self._on_gene_id_selected)
-        self.gene_id_input.setCompleter(self._gene_id_completer)
-        self.gene_id_input.lineEdit().setReadOnly(False)
-        self.gene_id_input.lineEdit().textEdited.connect(self._on_gene_id_text_edited)
-        self.gene_id_input.currentTextChanged.connect(self._on_single_gene_id_changed)
-        self.gene_id_input.lineEdit().installEventFilter(self)
+        self.gene_id_input.setPlaceholderText("请选择或输入基因 ID")
+        self.gene_id_input.textEdited.connect(self._on_gene_id_text_edited)
+        self.gene_id_input.textChanged.connect(self._on_single_gene_id_changed)
         self.gene_id_input.installEventFilter(self)
         id_layout.addWidget(self.gene_id_input, 1)
         input_layout.addLayout(id_layout)
+        
+        # 独立的选择列表（作为子控件，不是独立窗口）
+        self._popup_list = QListWidget(self)
+        self._popup_list.setMaximumHeight(300)
+        self._popup_list.setFocusPolicy(Qt.NoFocus)
+        self._popup_list.itemClicked.connect(self._on_popup_item_clicked)
+        self._popup_list.hide()
+        
         self._set_gene_id_loading_state("请选择参考基因组")
         
         # 批量输入
@@ -359,13 +356,12 @@ class GeneIDPage(QWidget):
 
     def _set_gene_id_loading_state(self, placeholder: str, disable: bool = True):
         self.gene_id_input.setEnabled(not disable)
-        self.gene_id_input.lineEdit().setReadOnly(False)
+        self.gene_id_input.setReadOnly(False)
         self.gene_id_input.blockSignals(True)
-        self._gene_id_popup_model.setStringList([""])
-        self.gene_id_input.setCurrentIndex(-1)
+        self.gene_id_input.clear()
         self.gene_id_input.blockSignals(False)
         self._gene_id_all_ids_set = set()
-        self.gene_id_input.lineEdit().setPlaceholderText(placeholder)
+        self.gene_id_input.setPlaceholderText(placeholder)
 
     def _load_gene_ids_async(self, annotation_path: str):
         self._pending_gene_id_path = annotation_path
@@ -387,50 +383,92 @@ class GeneIDPage(QWidget):
 
     def _apply_gene_id_list(self, ids: list):
         self.gene_id_input.setEnabled(True)
-        self.gene_id_input.lineEdit().setReadOnly(False)
+        self.gene_id_input.setReadOnly(False)
         self.gene_id_input.blockSignals(True)
-        self._gene_id_popup_model.setStringList([])
-        self.gene_id_input.setCurrentIndex(-1)
+        self.gene_id_input.clear()
         self.gene_id_input.blockSignals(False)
-        self.gene_id_input.lineEdit().setPlaceholderText("请选择或输入基因 ID")
+        self.gene_id_input.setPlaceholderText("请选择或输入基因 ID")
         self._gene_id_all_ids = list(ids)
         self._gene_id_all_ids_lower = [gid.lower() for gid in self._gene_id_all_ids]
         self._gene_id_all_ids_set = set(self._gene_id_all_ids)
         self._last_filter_text = ""
-        self._update_completer_matches("")
         self._update_batch_placeholder(ids)
-        QTimer.singleShot(50, self._show_gene_id_popup)
 
     def _on_gene_id_text_edited(self, text: str):
-        self._update_completer_matches(text)
+        # 输入时实时更新并显示匹配项
         self._show_gene_id_popup()
 
+    def _update_popup_debounced(self):
+        pass
+
     def _on_gene_id_selected(self, text: str):
-        if text:
-            self.gene_id_input.setCurrentText(text)
-            if self._gene_id_completer and self._gene_id_completer.popup():
-                self._gene_id_completer.popup().hide()
-            self._suppress_popup = True
-            QTimer.singleShot(200, self._clear_popup_suppress)
-            self.gene_id_input.lineEdit().setReadOnly(False)
-            self._last_filter_text = ""
+        pass
+
+    def _on_popup_item_clicked(self, item):
+        """点击弹窗列表项"""
+        self.gene_id_input.setText(item.text())
+        self._popup_list.hide()
+        self.gene_id_input.setFocus()
 
     def _show_gene_id_popup(self):
-        prefix = self.gene_id_input.lineEdit().text()
-        self._update_completer_matches(prefix)
-        if not self._gene_id_popup_model.stringList():
-            if self._gene_id_completer and self._gene_id_completer.popup():
-                self._gene_id_completer.popup().hide()
+        """显示选择框"""
+        if not self._gene_id_all_ids:
+            self._popup_list.hide()
             return
-        if self._gene_id_completer:
-            self._gene_id_completer.complete()
+        
+        current_text = self.gene_id_input.text().strip()
+        
+        # 计算匹配项
+        if not current_text:
+            matches = self._gene_id_all_ids[:20]
+        else:
+            needle = current_text.lower()
+            matches = []
+            for gid, gid_lower in zip(self._gene_id_all_ids, self._gene_id_all_ids_lower):
+                if needle in gid_lower:
+                    matches.append(gid)
+                    if len(matches) >= 20:
+                        break
+        
+        if not matches:
+            self._popup_list.hide()
+            return
+        
+        # 更新列表
+        self._popup_list.clear()
+        self._popup_list.addItems(matches)
+        
+        # 动态调整高度（每项约25px，最大300px）
+        item_height = 25
+        content_height = len(matches) * item_height + 4
+        actual_height = min(content_height, 300)
+        self._popup_list.setFixedHeight(actual_height)
+        
+        # 定位到输入框下方（相对于父控件）
+        pos = self.gene_id_input.mapTo(self, self.gene_id_input.rect().bottomLeft())
+        self._popup_list.setFixedWidth(self.gene_id_input.width())
+        self._popup_list.move(pos)
+        self._popup_list.raise_()  # 置顶
+        self._popup_list.show()
+
+    def _update_popup_content_only(self):
+        pass
+
+    def _update_popup_items(self):
+        pass
 
     def eventFilter(self, obj, event):
-        if obj in (self.gene_id_input, self.gene_id_input.lineEdit()):
-            if event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonRelease, QEvent.FocusIn):
-                if not self._suppress_popup:
-                    QTimer.singleShot(0, self._show_gene_id_popup)
+        if obj == self.gene_id_input:
+            if event.type() == QEvent.MouseButtonPress:
+                QTimer.singleShot(50, self._show_gene_id_popup)
+            elif event.type() == QEvent.FocusOut:
+                # 延迟隐藏，让点击事件先处理
+                QTimer.singleShot(200, self._hide_popup_if_no_focus)
         return super().eventFilter(obj, event)
+
+    def _hide_popup_if_no_focus(self):
+        if not self.gene_id_input.hasFocus() and not self._popup_list.hasFocus():
+            self._popup_list.hide()
 
     def _clear_popup_suppress(self) -> None:
         self._suppress_popup = False
@@ -457,12 +495,11 @@ class GeneIDPage(QWidget):
         self._syncing_inputs = False
 
     def _clear_single_input(self):
-        if not self.gene_id_input.currentText().strip():
+        if not self.gene_id_input.text().strip():
             return
         self._syncing_inputs = True
         self.gene_id_input.blockSignals(True)
-        self.gene_id_input.setCurrentIndex(0)
-        self.gene_id_input.setEditText("")
+        self.gene_id_input.clear()
         self.gene_id_input.blockSignals(False)
         self._syncing_inputs = False
 
@@ -495,15 +532,6 @@ class GeneIDPage(QWidget):
                     matches.append(gid)
                     if len(matches) >= 20:
                         break
-        self._update_gene_id_popup_items(matches)
-
-    def _update_gene_id_popup_items(self, matches: list):
-        current = self.gene_id_input.lineEdit().text()
-        self.gene_id_input.blockSignals(True)
-        self._gene_id_popup_model.setStringList(matches)
-        self.gene_id_input.setEditText(current)
-        self.gene_id_input.blockSignals(False)
-
 
     def _cleanup_gene_id_thread(self, thread: QThread):
         if thread in self._gene_id_threads:
@@ -588,7 +616,7 @@ class GeneIDPage(QWidget):
         
         # 获取 Gene ID
         gene_ids = []
-        single_id = self.gene_id_input.currentText().strip()
+        single_id = self.gene_id_input.text().strip()
         if single_id:
             gene_ids.append(single_id)
         
