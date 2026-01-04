@@ -812,30 +812,53 @@ class SequenceProcessor:
         self.ref_index_file = f"{ref_genome}.fai" if ref_genome else None
 
     def process(self, seq_file):
+        """处理序列文件（支持多序列 FASTA）"""
         print(f"\n{'='*50}")
         print(f"[INFO] 处理序列文件: {seq_file}")
         print(f"{'='*50}")
 
-        # 确保 FASTA 格式正确
-        seq_id, processed_file = self._prepare_fasta(seq_file)
+        # 解析多序列 FASTA
+        sequences = self._parse_multi_fasta(seq_file)
+        if not sequences:
+            print(f"[ERROR] 未找到有效序列")
+            return None
+        
+        print(f"[INFO] 共解析到 {len(sequences)} 个序列")
+        
+        results = []
+        for i, seq in enumerate(sequences):
+            seq_id = seq["seq_id"]
+            sequence = seq["sequence"]
+            print(f"\n[INFO] 处理序列 {seq_id} ({i+1}/{len(sequences)})")
+            
+            result = self._process_single(seq_id, sequence)
+            if result:
+                results.append(result)
+        
+        print(f"\n[INFO] 完成 {len(results)}/{len(sequences)} 个序列")
+        return results[-1] if results else None
 
-        # 读取序列内容获取长度
-        sequence = ""
-        with open(processed_file, "r") as f:
-            for line in f:
-                if not line.startswith(">"):
-                    sequence += line.strip()
+    def _process_single(self, seq_id, sequence):
+        """处理单个序列"""
+        # 清理 seq_id 中的非法路径字符
+        import re
+        safe_seq_id = re.sub(r'[<>:"/\\|?*]', "_", seq_id)
+        
+        # 写入临时 FASTA 文件
+        fasta_file = os.path.join(self.output_dir, f"{safe_seq_id}.fasta")
+        with open(fasta_file, "w") as f:
+            f.write(f">{safe_seq_id}\n{sequence}\n")
 
         # 比对
-        result = self.aligner.align(self.ref_genome, processed_file, seq_id)
+        result = self.aligner.align(self.ref_genome, fasta_file, safe_seq_id)
         if not result:
             return None
 
-        result["fasta"] = processed_file
-        result["id"] = seq_id
-        result["sequence"] = sequence  # 添加序列内容
+        result["fasta"] = fasta_file
+        result["id"] = safe_seq_id
+        result["sequence"] = sequence
 
-        # 可视化（传递 min_aln_len, merge_gap, ref_index_file）
+        # 可视化
         visualizer = SequenceVisualizer(
             self.output_dir,
             self.min_aln_len,
@@ -847,34 +870,47 @@ class SequenceProcessor:
 
         return result
 
-        return result
-
-    def _prepare_fasta(self, seq_file):
-        """确保 FASTA 文件有 ID 行"""
+    def _parse_multi_fasta(self, seq_file):
+        """
+        解析多序列 FASTA 文件
+        返回: [{"seq_id": "xxx", "sequence": "ATGC..."}, ...]
+        """
+        sequences = []
+        current_id = None
+        current_seq = []
+        auto_idx = 0
+        
         with open(seq_file, "r") as f:
-            lines = f.readlines()
-
-        has_id = any(line.startswith(">") for line in lines)
-
-        if has_id:
-            seq_id = None
-            for line in lines:
-                if line.startswith(">"):
-                    seq_id = line.strip().lstrip(">").split()[0]
-                    break
-            out_path = os.path.join(self.output_dir, f"{seq_id}.fasta")
-            with open(out_path, "w") as f:
-                f.writelines(lines)
-            return seq_id, out_path
-        else:
-            seq_id = "query_seq"
-            out_path = os.path.join(self.output_dir, f"{seq_id}.fasta")
-            with open(out_path, "w") as f:
-                f.write(f">{seq_id}\n")
-                for line in lines:
-                    if line.strip():
-                        f.write(line)
-            return seq_id, out_path
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('>'):
+                    # 保存上一个序列
+                    if current_seq:
+                        seq_str = ''.join(current_seq)
+                        if seq_str:
+                            if current_id is None:
+                                auto_idx += 1
+                                current_id = f"query_seq_{auto_idx}"
+                            sequences.append({"seq_id": current_id, "sequence": seq_str})
+                    # 开始新序列
+                    header = line[1:].strip()
+                    current_id = header.split()[0] if header else None
+                    current_seq = []
+                else:
+                    current_seq.append(line)
+        
+        # 保存最后一个序列
+        if current_seq:
+            seq_str = ''.join(current_seq)
+            if seq_str:
+                if current_id is None:
+                    auto_idx += 1
+                    current_id = f"query_seq_{auto_idx}"
+                sequences.append({"seq_id": current_id, "sequence": seq_str})
+        
+        return sequences
 
 
 # ======================= 主程序 =======================
@@ -884,25 +920,28 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:
-  # Gene ID 模式
+  # Gene ID 模式（单个）
   python GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -o output/
+
+  # Gene ID 模式（多个）
+  python GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 LOC_Os06g10991 -o output/
+
+  # Gene ID 模式（从文件读取）
+  python GeneScreen.py -ref Nippon -qry ZS97 -gid gene_list.txt -o output/
 
   # Gene ID 模式 + 上下游延伸（上游 2kb，下游 1kb）
   python GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -u 2000 -d 1000 -o output/
 
-  # Gene ID 列表模式
-  python GeneScreen.py -ref Nippon -qry ZS97 -gidl gene_list.txt -o output/
-
-  # Gene ID 列表模式 + 上下游延伸
-  python GeneScreen.py -ref Nippon -qry ZS97 -gidl gene_list.txt -u 2000 -d 1000 -o output/
-
-  # Location 模式（文件）
-  python GeneScreen.py -ref Nippon -qry ZS97 -loc positions.txt -o output/
-
-  # Location 模式（命令行直接指定）
+  # Location 模式（单个）
   python GeneScreen.py -ref Nippon -qry ZS97 -loc Chr1:1000-2000 -o output/
 
-  # Sequence 模式
+  # Location 模式（多个）
+  python GeneScreen.py -ref Nippon -qry ZS97 -loc Chr1:1000-2000 Chr2:3000-4000 -o output/
+
+  # Location 模式（从文件读取）
+  python GeneScreen.py -ref Nippon -qry ZS97 -loc positions.txt -o output/
+
+  # Sequence 模式（支持多序列 FASTA）
   python GeneScreen.py -ref Nippon -seq query.fasta -o output/
         """,
     )
@@ -915,10 +954,9 @@ def main():
 
     # 输入模式（互斥）
     input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("-gid", help="单个 Gene ID")
-    input_group.add_argument("-gidl", help="Gene ID 列表文件")
-    input_group.add_argument("-loc", help="位置：文件路径 或 区域字符串（Chr1:1000-2000）")
-    input_group.add_argument("-seq", help="序列文件（FASTA 格式）")
+    input_group.add_argument("-gid", nargs='+', help="Gene ID（多个值或文件路径）")
+    input_group.add_argument("-loc", nargs='+', help="位置（多个区域字符串或文件路径，格式: Chr1:1000-2000）")
+    input_group.add_argument("-seq", help="序列文件（FASTA 格式，支持多序列）")
 
     # 比对参数
     parser.add_argument(
@@ -993,7 +1031,7 @@ def main():
                                        min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
         processor.process(args.seq)
 
-    elif args.gid or args.gidl:
+    elif args.gid:
         if not args.qry:
             raise ValueError("Gene ID 模式需要指定 -qry 目标基因组")
         if not ref_annotation:
@@ -1008,12 +1046,15 @@ def main():
                                      qry_gff=qry_annotation, upstream=args.upstream, downstream=args.downstream,
                                      min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
 
+        # 判断是文件还是 Gene ID 列表
         gene_ids = []
-        if args.gid:
-            gene_ids = [args.gid]
+        if len(args.gid) == 1 and os.path.exists(args.gid[0]):
+            # 从文件读取（跳过注释行和空行）
+            with open(args.gid[0], encoding="utf-8-sig") as f:
+                gene_ids = [line.strip() for line in f if line.strip() and not line.startswith('#')]
         else:
-            with open(args.gidl) as f:
-                gene_ids = [line.strip() for line in f if line.strip()]
+            # 直接使用命令行参数
+            gene_ids = args.gid
 
         for gene_id in gene_ids:
             processor.process(gene_id)
@@ -1035,28 +1076,44 @@ def main():
                                         ref_gff=ref_annotation, qry_gff=qry_annotation,
                                         min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
 
-        # 判断是文件还是区域字符串
+        # 判断是文件还是区域字符串列表
         import re
-        region_match = re.match(r"(\w+):(\d+)-(\d+)", args.loc)
+        locations = []
         
-        if region_match:
-            # 区域字符串格式: Chr1:1000-2000
-            chrom, start, end = region_match.group(1), int(region_match.group(2)), int(region_match.group(3))
-            processor.process(chrom, start, end)
-        elif os.path.exists(args.loc):
-            # 文件
-            with open(args.loc, encoding="utf-8-sig") as f:  # utf-8-sig 自动处理 BOM
+        if len(args.loc) == 1 and os.path.exists(args.loc[0]):
+            # 从文件读取
+            with open(args.loc[0], encoding="utf-8-sig") as f:
                 for line in f:
                     line = line.strip()
                     if not line:
                         continue
                     parts = line.split("\t")
                     if len(parts) >= 3:
-                        chrom, start, end = parts[0], int(parts[1]), int(parts[2])
-                        name = parts[3] if len(parts) > 3 else None
-                        processor.process(chrom, start, end, name)
+                        locations.append({
+                            'chrom': parts[0],
+                            'start': int(parts[1]),
+                            'end': int(parts[2]),
+                            'name': parts[3] if len(parts) > 3 else None
+                        })
         else:
-            raise ValueError(f"无效的 -loc 参数: {args.loc}，应为文件路径或区域字符串（Chr1:1000-2000）")
+            # 解析区域字符串列表
+            for loc_str in args.loc:
+                match = re.match(r"(\w+):(\d+)-(\d+)", loc_str)
+                if match:
+                    locations.append({
+                        'chrom': match.group(1),
+                        'start': int(match.group(2)),
+                        'end': int(match.group(3)),
+                        'name': None
+                    })
+                else:
+                    print(f"[WARNING] 无效的位置格式: {loc_str}，跳过")
+        
+        if not locations:
+            raise ValueError("未找到有效的位置输入")
+        
+        for loc in locations:
+            processor.process(loc['chrom'], loc['start'], loc['end'], loc['name'])
 
     print(f"\n[INFO] 处理完成，结果保存在: {args.output}")
 

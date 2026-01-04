@@ -38,7 +38,7 @@ mamba*
 
 # ========== 任务文档 ==========
 **/tasks*.md
-**/*_TASKS.md
+**/*_TASKS*.md
 **/*_REQUIREMENTS.md
 
 # ========== 数据库 ==========
