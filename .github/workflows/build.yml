@@ -81,7 +81,7 @@ jobs:
           path: GeneScreen_GUI/dist/*.dmg
 
   build-macos-intel:
-    runs-on: macos-13  # Intel
+    runs-on: macos-15-large  # Intel
     steps:
       - uses: actions/checkout@v4
       
