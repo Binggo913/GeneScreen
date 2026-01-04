@@ -911,6 +911,7 @@ def main():
     parser.add_argument("-ref", required=True, help="参考基因组（内置名称或路径）")
     parser.add_argument("-qry", help="目标基因组（Gene ID/Location 模式必需）")
     parser.add_argument("-ra", help="参考基因组注释文件（覆盖默认）")
+    parser.add_argument("-ra-source", help="参考基因组注释版本（如 igv, ensembl_plants）")
 
     # 输入模式（互斥）
     input_group = parser.add_mutually_exclusive_group(required=True)
@@ -969,8 +970,9 @@ def main():
     if args.downstream < 0:
         raise ValueError(f"-d/--downstream 参数不能为负数，当前值: {args.downstream}")
 
-    # 获取基因组路径
-    ref_genome, ref_annotation = genome_manager.get(args.ref)
+    # 获取基因组路径（支持注释版本选择）
+    ra_source = getattr(args, 'ra_source', None)
+    ref_genome, ref_annotation = genome_manager.get(args.ref, annotation_source=ra_source)
     if not ref_genome:
         print(f"\n基因组 '{args.ref}' 不可用。")
         print("可以使用以下命令管理基因组:")

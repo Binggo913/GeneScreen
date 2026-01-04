@@ -26,6 +26,8 @@ class Database:
         """获取数据库连接的上下文管理器"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # 启用外键约束（SQLite 默认关闭）
+        conn.execute("PRAGMA foreign_keys = ON")
         try:
             yield conn
             conn.commit()
@@ -54,10 +56,42 @@ class Database:
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
 
+                -- 注释版本表（一对多：一个基因组可有多个注释版本）
+                CREATE TABLE IF NOT EXISTS genome_annotations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    genome_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    annotation_path TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (genome_id) REFERENCES genomes(id) ON DELETE CASCADE,
+                    UNIQUE(genome_id, source)
+                );
+
                 -- 索引
                 CREATE INDEX IF NOT EXISTS idx_genomes_name ON genomes(name);
                 CREATE INDEX IF NOT EXISTS idx_genomes_source ON genomes(source);
+                CREATE INDEX IF NOT EXISTS idx_annotations_genome ON genome_annotations(genome_id);
             ''')
+            self._migrate_annotations(conn)
+
+    def _migrate_annotations(self, conn):
+        """迁移历史单注释记录到 genome_annotations 表"""
+        cursor = conn.execute('''
+            SELECT g.id, g.annotation_path
+            FROM genomes g
+            WHERE g.annotation_path IS NOT NULL AND g.annotation_path != ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM genome_annotations ga WHERE ga.genome_id = g.id
+              )
+        ''')
+        rows = cursor.fetchall()
+        for row in rows:
+            conn.execute('''
+                INSERT INTO genome_annotations (genome_id, source, annotation_path)
+                VALUES (?, 'version1', ?)
+            ''', (row[0], row[1]))
+        if rows:
+            print(f"[INFO] 已迁移 {len(rows)} 条注释记录到 genome_annotations 表")
 
     # ==================== 基因组 CRUD ====================
 
@@ -90,6 +124,15 @@ class Database:
         with self.connection() as conn:
             cursor = conn.execute(
                 'SELECT * FROM genomes WHERE name = ?', (name,)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_genome_by_id(self, genome_id: int) -> Optional[Dict[str, Any]]:
+        """根据 ID 获取基因组"""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM genomes WHERE id = ?', (genome_id,)
             )
             row = cursor.fetchone()
             return dict(row) if row else None
@@ -138,6 +181,75 @@ class Database:
                 'SELECT 1 FROM genomes WHERE name = ?', (name,)
             )
             return cursor.fetchone() is not None
+
+    # ==================== 注释版本 CRUD ====================
+
+    def add_annotation(
+        self,
+        genome_id: int,
+        source: str,
+        annotation_path: str
+    ) -> int:
+        """添加注释版本记录，若已存在返回 -1"""
+        try:
+            with self.connection() as conn:
+                cursor = conn.execute('''
+                    INSERT INTO genome_annotations (genome_id, source, annotation_path)
+                    VALUES (?, ?, ?)
+                ''', (genome_id, source, annotation_path))
+                return cursor.lastrowid
+        except sqlite3.IntegrityError:
+            return -1
+
+    def get_annotations(self, genome_id: int) -> List[Dict[str, Any]]:
+        """获取基因组的所有注释版本"""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM genome_annotations WHERE genome_id = ? ORDER BY created_at',
+                (genome_id,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_annotation_by_source(self, genome_id: int, source: str) -> Optional[Dict[str, Any]]:
+        """根据 genome_id 和 source 获取注释版本"""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                'SELECT * FROM genome_annotations WHERE genome_id = ? AND source = ?',
+                (genome_id, source)
+            )
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_default_annotation(self, genome_id: int) -> Optional[Dict[str, Any]]:
+        """获取基因组的默认注释（优先 version1，否则第一个）"""
+        annotations = self.get_annotations(genome_id)
+        if not annotations:
+            return None
+        for ann in annotations:
+            if ann['source'] == 'version1':
+                return ann
+        return annotations[0]
+
+    def delete_annotation(self, annotation_id: int) -> bool:
+        """删除注释版本记录"""
+        with self.connection() as conn:
+            cursor = conn.execute(
+                'DELETE FROM genome_annotations WHERE id = ?', (annotation_id,)
+            )
+            return cursor.rowcount > 0
+
+    def update_annotation(self, annotation_id: int, **kwargs) -> bool:
+        """更新注释版本记录"""
+        if not kwargs:
+            return False
+        fields = ', '.join(f'{k} = ?' for k in kwargs.keys())
+        values = list(kwargs.values()) + [annotation_id]
+        with self.connection() as conn:
+            cursor = conn.execute(
+                f'UPDATE genome_annotations SET {fields} WHERE id = ?',
+                values
+            )
+            return cursor.rowcount > 0
 
 
 # 全局数据库实例

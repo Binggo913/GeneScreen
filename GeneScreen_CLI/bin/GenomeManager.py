@@ -55,13 +55,17 @@ class GenomeManager:
 
     # ==================== 基因组获取 ====================
 
-    def get(self, name_or_path: str):
+    def get(self, name_or_path: str, annotation_source: Optional[str] = None):
         """
         获取基因组路径
 
         参数可以是：
         - 数据库中的基因组名称
         - 本地文件路径
+
+        Args:
+            name_or_path: 基因组名称或路径
+            annotation_source: 注释版本来源（可选，默认使用 version1 或第一个）
 
         返回: (genome_path, annotation_path) 或 (None, None)
         """
@@ -72,7 +76,17 @@ class GenomeManager:
         # 2. 从数据库查找
         genome = self.db.get_genome(name_or_path)
         if genome:
-            return genome["fasta_path"], genome.get("annotation_path")
+            # 获取注释版本
+            if annotation_source:
+                ann = self.db.get_annotation_by_source(genome["id"], annotation_source)
+                if not ann:
+                    print(f"[WARNING] 未找到注释版本 '{annotation_source}'，使用默认注释")
+                    ann = self.db.get_default_annotation(genome["id"])
+            else:
+                ann = self.db.get_default_annotation(genome["id"])
+            
+            annotation_path = ann["annotation_path"] if ann else genome.get("annotation_path")
+            return genome["fasta_path"], annotation_path
 
         print(f"[ERROR] 未找到基因组: {name_or_path}")
         print("  使用 'python GenomeManager.py search <keyword>' 搜索可用基因组")
@@ -131,6 +145,50 @@ class GenomeManager:
         )
         print(f"[INFO] 已添加自定义基因组: {name}")
         return True
+
+    def add_annotation(self, genome_name: str, annotation_path: str, source: Optional[str] = None) -> bool:
+        """为已有基因组添加注释版本"""
+        genome = self.db.get_genome(genome_name)
+        if not genome:
+            print(f"[ERROR] 未找到基因组: {genome_name}")
+            return False
+
+        if not os.path.exists(annotation_path):
+            print(f"[ERROR] 注释文件不存在: {annotation_path}")
+            return False
+
+        # 解析 source（从文件名或使用默认值）
+        if not source:
+            source = self._parse_annotation_source(Path(annotation_path).name) or "version1"
+
+        result = self.db.add_annotation(genome["id"], source, os.path.abspath(annotation_path))
+        if result == -1:
+            print(f"[ERROR] 注释版本 '{source}' 已存在")
+            return False
+
+        print(f"[INFO] 已添加注释版本: {genome_name} -> {source}")
+        return True
+
+    def list_annotations(self, genome_name: str) -> List[Dict[str, Any]]:
+        """列出基因组的所有注释版本"""
+        genome = self.db.get_genome(genome_name)
+        if not genome:
+            return []
+        return self.db.get_annotations(genome["id"])
+
+    @staticmethod
+    def _parse_annotation_source(filename: str) -> Optional[str]:
+        """从文件名解析注释来源，格式: {source}.{species}.{ext}"""
+        parts = filename.split(".")
+        if len(parts) >= 3:
+            # 检查最后一个是否是扩展名
+            ext = parts[-1].lower()
+            if ext in ("gff", "gff3", "gtf", "gz"):
+                if ext == "gz" and len(parts) >= 4:
+                    # xxx.gff3.gz
+                    return parts[0] if parts[0] not in ("gff", "gff3", "gtf") else None
+                return parts[0] if parts[0] not in ("gff", "gff3", "gtf") else None
+        return None
 
     def _gunzip_copy(self, gz_file: str, out_file: str):
         """解压 gzip 文件（保留原文件）"""
@@ -252,13 +310,13 @@ class GenomeManager:
         # 创建索引
         self._ensure_fasta_index(str(fasta_file))
 
-        # 下载 GFF3
+        # 下载 GFF3（使用 {source}.{species}.{ext} 命名）
         annotation_file = None
         for rel in [release, "62", "61", "60", "59", "58", "57"]:
             gff_filename = f"{species_cap}.{assembly}.{rel}.gff3.gz"
             gff_url = f"{ENSEMBL_FTP_BASE}/gff3/{species_name}/{gff_filename}"
             gff_gz = genome_dir / gff_filename
-            gff_file = genome_dir / f"{species_name}.gff3"
+            gff_file = genome_dir / f"ensembl_plants.{species_name}.gff3"  # 新命名格式
 
             print(f"[INFO] 下载 GFF3: {gff_url}")
             if self._download_file(gff_url, str(gff_gz)):
@@ -282,7 +340,7 @@ class GenomeManager:
             print("[WARN] GFF3 注释文件下载失败，基因组仍可使用")
 
         # 保存到数据库
-        self.db.add_genome(
+        genome_id = self.db.add_genome(
             name=species_name,
             fasta_path=str(fasta_file),
             annotation_path=str(annotation_file) if annotation_file else None,
@@ -291,6 +349,10 @@ class GenomeManager:
             assembly=assembly,
             species=species_info.get("display_name") or species_name
         )
+        
+        # 添加到注释版本表
+        if annotation_file:
+            self.db.add_annotation(genome_id, "ensembl_plants", str(annotation_file))
 
         print(f"[INFO] 基因组 {species_name} 下载完成")
         return True
@@ -363,7 +425,7 @@ class GenomeManager:
         # 创建索引
         self._ensure_fasta_index(str(fasta_file))
 
-        # 下载注释（如果有）
+        # 下载注释（如果有，使用 {source}.{species}.{ext} 命名）
         annotation_file = None
         tracks = igv_genome.get("tracks", [])
         for track in tracks:
@@ -371,13 +433,13 @@ class GenomeManager:
                 ann_url = track.get("url")
                 if ann_url:
                     ext = track.get("format", "gff3")
-                    annotation_file = genome_dir / f"{genome_id}.{ext}"
+                    annotation_file = genome_dir / f"igv.{genome_id}.{ext}"  # 新命名格式
                     print(f"[INFO] 下载注释: {ann_url}")
                     self._download_file(ann_url, str(annotation_file))
                     break
 
         # 保存到数据库
-        self.db.add_genome(
+        db_genome_id = self.db.add_genome(
             name=genome_id,
             fasta_path=str(fasta_file),
             annotation_path=str(annotation_file) if annotation_file else None,
@@ -385,6 +447,10 @@ class GenomeManager:
             source="igv",
             description=igv_genome.get("description")
         )
+        
+        # 添加到注释版本表
+        if annotation_file:
+            self.db.add_annotation(db_genome_id, "igv", str(annotation_file))
 
         print(f"[INFO] 基因组 {genome_id} 下载完成")
         return True
@@ -527,22 +593,37 @@ def main():
     info_parser = subparsers.add_parser("info", help="查看基因组信息")
     info_parser.add_argument("name", help="基因组名称")
 
+    # add-annotation - 添加注释版本
+    add_ann_parser = subparsers.add_parser("add-annotation", help="为基因组添加注释版本")
+    add_ann_parser.add_argument("genome", help="基因组名称")
+    add_ann_parser.add_argument("annotation", help="注释文件路径")
+    add_ann_parser.add_argument("-s", "--source", help="注释来源标识（默认从文件名解析或 version1）")
+
     args = parser.parse_args()
     manager = GenomeManager()
 
     if args.command == "list":
-        genomes = manager.list_all()
         all_genomes = manager.list_genomes()
         
         # 按来源分组显示
         custom_genomes = [g for g in all_genomes if g.get("source") == "custom"]
         downloaded_genomes = [g for g in all_genomes if g.get("source") != "custom"]
         
+        def _format_annotations(genome):
+            """格式化注释版本信息"""
+            anns = manager.list_annotations(genome["name"])
+            if anns:
+                sources = [a["source"] for a in anns]
+                return f" [{', '.join(sources)}]"
+            elif genome.get("annotation_path"):
+                return " [version1]"
+            return ""
+        
         print("\n=== 自定义基因组 ===")
         if custom_genomes:
             for g in custom_genomes:
-                ann = " + GFF" if g.get("annotation_path") else ""
-                print(f"  {g['name']}: {g['fasta_path']}{ann}")
+                ann_info = _format_annotations(g)
+                print(f"  {g['name']}: {g['fasta_path']}{ann_info}")
         else:
             print("  (无)")
             
@@ -550,8 +631,8 @@ def main():
         if downloaded_genomes:
             for g in downloaded_genomes:
                 source = g.get("source", "unknown")
-                ann = " + GFF" if g.get("annotation_path") else ""
-                print(f"  {g['name']} [{source}]: {g['fasta_path']}{ann}")
+                ann_info = _format_annotations(g)
+                print(f"  {g['name']} [{source}]: {g['fasta_path']}{ann_info}")
         else:
             print("  (无)")
 
@@ -596,9 +677,16 @@ def main():
     elif args.command == "info":
         info = manager.info(args.name)
         if info:
+            # 添加注释版本信息
+            anns = manager.list_annotations(args.name)
+            if anns:
+                info["annotations"] = anns
             print(json.dumps(info, indent=2, ensure_ascii=False, default=str))
         else:
             print(f"未找到基因组: {args.name}")
+
+    elif args.command == "add-annotation":
+        manager.add_annotation(args.genome, args.annotation, args.source)
 
     else:
         parser.print_help()
