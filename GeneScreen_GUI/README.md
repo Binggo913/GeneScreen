@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/Binggo913/GeneScreen)](https://github.com/Binggo913/GeneScreen/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-基因组比对与变异分析工具 - 跨平台桌面版
+基因组比对与变异分析工具 - 桌面版
 
 ![screenshot](docs/screenshot.png)
 
@@ -11,21 +11,25 @@
 
 - **Gene ID 模式**: 输入基因 ID，从参考基因组提取序列并与目标基因组比对
 - **Location 模式**: 输入染色体坐标，提取指定区域并与目标基因组比对
-- **Sequence 模式**: 输入序列，与参考基因组进行比对
+- **Sequence 模式**: 输入序列，与参考基因组进行比对（支持多序列批量分析）
 - **变异检测**: 自动检测 SNP 和 Indel 变异
 - **可视化报告**: 生成交互式 HTML 分析报告，包含 LINKVIEW 可视化
 - **基因组管理**: 支持本地基因组、IGV 公共基因组、Ensembl Plants 植物基因组
 - **历史记录**: 自动保存分析历史，支持快速查看和重新分析
 
-## 快速开始
+## 下载安装
 
-### 下载安装
+### Windows
 
-1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载 `GeneScreen_Setup.exe`
+1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载 `GeneScreen_Setup_x.x.x.exe`
 2. 运行安装程序，按提示完成安装
 3. 安装 BLAST+（见下方说明）
 
-### 安装 BLAST+
+### macOS
+
+*Coming soon*
+
+## 安装 BLAST+
 
 GeneScreen 依赖 NCBI BLAST+ 进行序列比对，需要单独安装：
 
@@ -34,16 +38,9 @@ GeneScreen 依赖 NCBI BLAST+ 进行序列比对，需要单独安装：
 2. 运行安装程序，安装时勾选"Add to PATH"
 3. 重启电脑或重新打开终端
 
-**Linux:**
+**macOS:**
 ```bash
-# Ubuntu/Debian
-sudo apt install ncbi-blast+
-
-# CentOS/RHEL
-sudo yum install ncbi-blast+
-
-# Conda
-conda install -c bioconda blast
+brew install blast
 ```
 
 **验证安装:**
@@ -74,7 +71,7 @@ blastn -version
 ### Sequence 模式
 
 1. 选择参考基因组
-2. 输入或粘贴序列（FASTA 格式或纯序列）
+2. 输入或粘贴序列（FASTA 格式，支持多序列批量分析）
 3. 点击"开始分析"
 
 ## 基因组管理
@@ -119,25 +116,21 @@ python main.py
 ### 打包
 
 ```bash
-# 打包可执行文件
+# Windows: 打包可执行文件
 python build.py
 
-# 打包并生成 Windows 安装包（需要 Inno Setup）
+# Windows: 打包并生成安装包（需要 Inno Setup）
 python build.py --setup
+
+# macOS: 打包 .app
+python build.py --mac
 ```
 
 ## 系统要求
 
-- Windows 10/11 (64-bit) 或 Linux
+- Windows 10/11 (x64) 或 macOS 10.15+
 - BLAST+ 2.12+
 - 4GB+ 内存（推荐 8GB+）
-
-## 依赖
-
-- PySide6 - GUI 框架
-- pyfaidx - FASTA 索引和序列提取
-- biopython - BLAST 结果解析
-- ripgrep - 快速 GFF 搜索（已内置）
 
 ## 许可证
 

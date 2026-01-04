@@ -10,15 +10,22 @@
 AppId={{B8F3A2D1-5E7C-4A9B-8D6F-1C2E3A4B5C6D}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
+AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
+VersionInfoVersion={#MyAppVersion}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
+; 升级支持
+UsePreviousAppDir=yes
+CloseApplications=force
+RestartApplications=yes
 ; 输出目录和文件名
 OutputDir=dist
-OutputBaseFilename=GeneScreen_Setup
-; 图标（可选）
-; SetupIconFile=ui\resources\icons\app.ico
+OutputBaseFilename=GeneScreen_Setup_{#MyAppVersion}
+; 图标
+SetupIconFile=ui\resources\icons\app.ico
+UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
