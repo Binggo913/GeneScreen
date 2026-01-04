@@ -12,6 +12,7 @@ import json
 import datetime
 import subprocess
 import sys
+import re
 
 # Windows 下隐藏黑窗口
 from utils import run_subprocess
@@ -3460,6 +3461,9 @@ class BaseVisualizer:
         if not coords_file or not os.path.exists(coords_file):
             return None
         
+        # 清理 region_id 中的非法路径字符用于文件名
+        safe_region_id = re.sub(r'[<>:"/\\|?*]', "_", region_id)
+        
         # 从 coords 文件中提取主比对区域（总比对长度最长的染色体）
         chr_alignments = {}  # chr -> [(start, end, aln_len), ...]
         
@@ -3511,7 +3515,7 @@ class BaseVisualizer:
             print(f"[INFO] 比对区域: {main_chr}:{region_start}-{region_end}")
             
             # 从 GFF 中提取该区域的注释
-            output_gff = os.path.join(output_dir, f"{region_id}.{track_name}.linkview.gff3")
+            output_gff = os.path.join(output_dir, f"{safe_region_id}.{track_name}.linkview.gff3")
             features_found = False
             
             # 只保留基因结构相关的特征类型（LINKVIEW 需要有 Parent 属性的特征）
@@ -4702,9 +4706,11 @@ class SequenceVisualizer(BaseVisualizer):
         - ref_gff: 参考基因组 GFF（可选，用于提取比对区域的注释）
         """
         seq_id = result["id"]
+        # 清理 seq_id 中的非法路径字符用于文件名
+        safe_seq_id = re.sub(r'[<>:"/\\|?*]', "_", seq_id)
         sequence = result.get("sequence", "")
         input_fasta = result.get("fasta", "")
-        prefix = result.get("prefix", os.path.join(self.output_dir, seq_id))
+        prefix = result.get("prefix", os.path.join(self.output_dir, safe_seq_id))
         print(f"[INFO] Sequence 可视化: {seq_id}")
 
         # 生成 HTML 报告
@@ -4747,7 +4753,7 @@ class SequenceVisualizer(BaseVisualizer):
         ref_gff_file = None
         if genome_files and genome_files.get('ref_gff') and coords_file:
             ref_gff_file = self._extract_aligned_region_gff(
-                genome_files.get('ref_gff'), coords_file, seq_id, self.output_dir, track_name="ref"
+                genome_files.get('ref_gff'), coords_file, safe_seq_id, self.output_dir, track_name="ref"
             )
         
         # 结果统计模块（已移至宏观图下方的区域统计卡片，见任务5）
@@ -4756,25 +4762,25 @@ class SequenceVisualizer(BaseVisualizer):
         # 比对可视化（如果有 GFF 则显示基因结构，否则只显示 SNP/Indel）
         # Sequence 模式：上方轨道是用户输入序列（无注释），下方轨道是参考基因组（有注释，绝对坐标）
         html += self._generate_linkview_visualization_section(
-            seq_id, fasta_file, coords_file, snps_file, None, ref_gff_file
+            safe_seq_id, fasta_file, coords_file, snps_file, None, ref_gff_file
         )
         
         # 结果文件模块（不包含输入序列文件）
         output_files = [
-            (f"{seq_id}.blast.xml", result.get("blast_xml", ""), "BLAST 比对结果"),
-            (f"{seq_id}.coords", result.get("coords", ""), "比对坐标文件"),
-            (f"{seq_id}.snps", result.get("snps", ""), "SNP/Indel 变异文件"),
+            (f"{safe_seq_id}.blast.xml", result.get("blast_xml", ""), "BLAST 比对结果"),
+            (f"{safe_seq_id}.coords", result.get("coords", ""), "比对坐标文件"),
+            (f"{safe_seq_id}.snps", result.get("snps", ""), "SNP/Indel 变异文件"),
         ]
         # 如果生成了参考基因组区域 GFF，也添加到结果文件
         if ref_gff_file:
-            output_files.append((f"{seq_id}.ref.linkview.gff3", ref_gff_file, "参考基因组比对区域注释（绝对坐标）"))
+            output_files.append((f"{safe_seq_id}.ref.linkview.gff3", ref_gff_file, "参考基因组比对区域注释（绝对坐标）"))
         
         html += self._generate_output_section(output_files)
         
         html += self._get_html_footer()
         
         # 保存报告
-        report_file = os.path.join(self.output_dir, f"{seq_id}.report.html")
+        report_file = os.path.join(self.output_dir, f"{safe_seq_id}.report.html")
         with open(report_file, "w", encoding="utf-8") as f:
             f.write(html)
         

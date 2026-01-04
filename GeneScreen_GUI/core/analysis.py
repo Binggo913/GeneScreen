@@ -430,7 +430,10 @@ class BlastAligner:
         identity_threshold: float = 90
     ) -> Optional[Dict[str, str]]:
         """执行 BLAST 比对"""
-        prefix = os.path.join(self.output_dir, prefix_name)
+        # 清理 prefix_name 中的非法路径字符
+        import re
+        safe_prefix_name = re.sub(r'[<>:"/\\|?*]', "_", prefix_name)
+        prefix = os.path.join(self.output_dir, safe_prefix_name)
 
         if not ensure_blast_db(reference):
             return None
@@ -723,6 +726,11 @@ class SequenceProcessor:
             'ref_gff': ref_gff
         }
 
+    def set_output_dir(self, output_dir: str):
+        """设置输出目录（同时更新 aligner）"""
+        self.output_dir = output_dir
+        self.aligner = BlastAligner(output_dir)
+
     def process(self, seq_file: str) -> Optional[Dict[str, Any]]:
         """处理序列文件"""
         print(f"\n{'='*50}")
@@ -754,16 +762,19 @@ class SequenceProcessor:
 
     def process_sequence_text(self, sequence: str, seq_id: str = "query_seq") -> Optional[Dict[str, Any]]:
         """处理序列文本（GUI 用）"""
-        fasta_file = os.path.join(self.output_dir, f"{seq_id}.fasta")
+        # 清理 seq_id 中的非法路径字符用于文件名和 FASTA header
+        import re
+        safe_seq_id = re.sub(r'[<>:"/\\|?*]', "_", seq_id)
+        fasta_file = os.path.join(self.output_dir, f"{safe_seq_id}.fasta")
         with open(fasta_file, "w") as f:
-            f.write(f">{seq_id}\n{sequence}\n")
+            f.write(f">{safe_seq_id}\n{sequence}\n")
         
-        result = self.aligner.align(self.ref_genome, fasta_file, seq_id, self.identity)
+        result = self.aligner.align(self.ref_genome, fasta_file, safe_seq_id, self.identity)
         if not result:
             return None
 
         result["fasta"] = fasta_file
-        result["id"] = seq_id
+        result["id"] = safe_seq_id  # 使用清理后的 ID
         result["sequence"] = sequence
         result["mode"] = "sequence"
         result["ref_name"] = self.ref_name

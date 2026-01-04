@@ -4,15 +4,15 @@ GeneScreen 3.0 - Sequence 模式页面
 输入序列，与参考基因组进行比对
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QAbstractSpinBox
+    QAbstractSpinBox, QLineEdit
 )
 from PySide6.QtCore import QThread, Signal, Qt
 from datetime import datetime
 import os
-from pathlib import Path
+import re
 
 from ui.widgets.genome_selector import GenomeSelector
 from core import SequenceProcessor, get_database
@@ -21,26 +21,47 @@ from core.config import get_output_dir
 
 
 class SequenceAnalysisThread(QThread):
-    """分析线程"""
+    """分析线程 - 支持多序列批量处理"""
     progress = Signal(str)
     finished = Signal(bool, dict, str)
+    item_finished = Signal(str, object, str)  # seq_id, result, error
     
-    def __init__(self, processor, sequence: str, seq_id: str, parent=None):
+    def __init__(self, processor, sequences: list, output_dir_builder=None, parent=None):
         super().__init__(parent)
         self.processor = processor
-        self.sequence = sequence
-        self.seq_id = seq_id
+        self.sequences = sequences  # [{"seq_id": "xxx", "sequence": "ATGC..."}, ...]
+        self.output_dir_builder = output_dir_builder
     
     def run(self):
-        self.progress.emit(f"处理序列 {self.seq_id}...")
-        try:
-            result = self.processor.process_sequence_text(self.sequence, self.seq_id)
-            if result:
-                self.finished.emit(True, result, "分析完成")
-            else:
-                self.finished.emit(False, {}, "分析失败")
-        except Exception as e:
-            self.finished.emit(False, {}, f"分析出错: {str(e)}")
+        results = []
+        for i, seq in enumerate(self.sequences):
+            seq_id = seq["seq_id"]
+            self.progress.emit(f"处理序列 {seq_id} ({i+1}/{len(self.sequences)})...")
+            try:
+                # 设置输出目录
+                if self.output_dir_builder:
+                    output_dir = self.output_dir_builder(seq)
+                    if output_dir:
+                        os.makedirs(output_dir, exist_ok=True)
+                        self.processor.set_output_dir(output_dir)
+                
+                result = self.processor.process_sequence_text(seq["sequence"], seq_id)
+                if result and "output_dir" not in result:
+                    result["output_dir"] = getattr(self.processor, "output_dir", "")
+                
+                if result:
+                    self.item_finished.emit(seq_id, result, "")
+                    results.append(result)
+                else:
+                    self.item_finished.emit(seq_id, None, "未产生结果")
+            except Exception as e:
+                self.progress.emit(f"处理 {seq_id} 出错: {str(e)}")
+                self.item_finished.emit(seq_id, None, str(e))
+        
+        if results:
+            self.finished.emit(True, results[-1], f"完成 {len(results)}/{len(self.sequences)} 个序列")
+        else:
+            self.finished.emit(False, {}, "所有序列处理失败")
 
 
 class SequencePage(QWidget):
@@ -49,11 +70,13 @@ class SequencePage(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.history_id = None
-        self._default_seq_id = "query_seq"
-        self._seq_id_manual = False
-        self._last_auto_seq_id = ""
         self._auto_output_dir = ""
+        self._batch_mode = False
+        self._history_map = {}
+        self._output_dir_map = {}
+        self._report_queue = []
         self._report_worker = None
+        self._active_report_job = None
         self._pending_finish_message = ""
         self._last_report_path = ""
         self._init_ui()
@@ -84,29 +107,17 @@ class SequencePage(QWidget):
         input_group = QGroupBox("输入序列")
         input_layout = QVBoxLayout(input_group)
         
-        # 序列 ID
-        id_layout = QHBoxLayout()
-        id_label = QLabel("序列 ID:")
-        id_label.setMinimumWidth(80)
-        id_layout.addWidget(id_label)
-        
-        self.seq_id_input = QLineEdit()
-        self.seq_id_input.setPlaceholderText("输入序列 ID (如: my_sequence)")
-        self.seq_id_input.setText(self._default_seq_id)
-        self.seq_id_input.textEdited.connect(self._on_seq_id_edited)
-        id_layout.addWidget(self.seq_id_input, 1)
-        input_layout.addLayout(id_layout)
-        
-        # 序列输入
-        input_layout.addSpacing(10)
-        seq_label = QLabel("序列 (FASTA 格式或纯序列):")
+        # 序列输入（支持多序列 FASTA）
+        seq_label = QLabel("序列 (支持多序列 FASTA 格式):")
         seq_label.setProperty("role", "muted")
         input_layout.addWidget(seq_label)
         
         self.sequence_input = QTextEdit()
-        self.sequence_input.setPlaceholderText(">my_sequence\nATGCATGCATGC...\n\n或直接输入序列:\nATGCATGCATGC...")
+        self.sequence_input.setPlaceholderText(
+            ">seq1\nATGCATGCATGC...\n>seq2\nGCTAGCTAGCTA...\n\n"
+            "或直接输入纯序列 (自动命名为 query_seq_1, query_seq_2...)"
+        )
         self.sequence_input.setMinimumHeight(150)
-        self.sequence_input.textChanged.connect(self._on_sequence_text_changed)
         input_layout.addWidget(self.sequence_input)
         
         # 从文件加载
@@ -228,7 +239,7 @@ class SequencePage(QWidget):
             self._set_default_output_dir()
     
     def _load_from_file(self):
-        """从文件加载序列"""
+        """从文件加载序列（支持多序列 FASTA）"""
         path, _ = QFileDialog.getOpenFileName(
             self, "选择序列文件", "",
             "FASTA 文件 (*.fa *.fasta *.fna);;文本文件 (*.txt);;所有文件 (*)"
@@ -238,53 +249,52 @@ class SequencePage(QWidget):
                 with open(path, 'r') as f:
                     content = f.read()
                 self.sequence_input.setText(content)
-                self._update_seq_id_from_text(content, force=True)
             except Exception as e:
                 QMessageBox.warning(self, "错误", f"读取文件失败: {str(e)}")
 
-    def _on_seq_id_edited(self, text: str) -> None:
-        if text.strip():
-            if text.strip() != self._last_auto_seq_id:
-                self._seq_id_manual = True
-        else:
-            self._seq_id_manual = False
-
-    def _on_sequence_text_changed(self) -> None:
-        text = self.sequence_input.toPlainText()
-        self._update_seq_id_from_text(text)
-
-    def _extract_seq_id_from_text(self, text: str) -> str:
-        for line in text.splitlines():
-            line = line.strip()
-            if not line.startswith('>'):
-                continue
-            header = line[1:].strip()
-            if not header:
-                continue
-            return header.split()[0]
-        return ""
-
-    def _update_seq_id_from_text(self, text: str, force: bool = False) -> None:
-        seq_id = self._extract_seq_id_from_text(text)
-        if not seq_id:
-            if not self.seq_id_input.text().strip():
-                self.seq_id_input.setText(self._default_seq_id)
-            return
-        current = self.seq_id_input.text().strip()
-        if force or not self._seq_id_manual or current in ("", self._default_seq_id, self._last_auto_seq_id):
-            self.seq_id_input.setText(seq_id)
-            self._last_auto_seq_id = seq_id
-            self._seq_id_manual = False
-    
-    def _parse_sequence(self, text: str) -> str:
-        """解析序列文本，返回纯序列"""
+    def _parse_multi_fasta(self, text: str) -> list:
+        """
+        解析多序列 FASTA 文本
+        返回: [{"seq_id": "xxx", "sequence": "ATGC..."}, ...]
+        纯序列自动命名为 query_seq_1, query_seq_2...
+        """
+        sequences = []
         lines = text.strip().split('\n')
-        sequence = ""
+        current_id = None
+        current_seq = []
+        auto_idx = 0
+        
         for line in lines:
             line = line.strip()
-            if not line.startswith('>'):
-                sequence += line
-        return sequence
+            if not line:
+                continue
+            if line.startswith('>'):
+                # 保存上一个序列
+                if current_seq:
+                    seq_str = ''.join(current_seq)
+                    if seq_str:
+                        if current_id is None:
+                            auto_idx += 1
+                            current_id = f"query_seq_{auto_idx}"
+                        sequences.append({"seq_id": current_id, "sequence": seq_str})
+                # 开始新序列
+                header = line[1:].strip()
+                current_id = header.split()[0] if header else None
+                current_seq = []
+            else:
+                # 序列行
+                current_seq.append(line)
+        
+        # 保存最后一个序列
+        if current_seq:
+            seq_str = ''.join(current_seq)
+            if seq_str:
+                if current_id is None:
+                    auto_idx += 1
+                    current_id = f"query_seq_{auto_idx}"
+                sequences.append({"seq_id": current_id, "sequence": seq_str})
+        
+        return sequences
     
     def _run_analysis(self):
         """运行分析"""
@@ -295,19 +305,22 @@ class SequencePage(QWidget):
             QMessageBox.warning(self, "提示", "请选择参考基因组")
             return
         
-        # 获取序列
+        # 解析序列
         seq_text = self.sequence_input.toPlainText().strip()
         if not seq_text:
             QMessageBox.warning(self, "提示", "请输入序列")
             return
         
-        sequence = self._parse_sequence(seq_text)
-        if len(sequence) < 50:
-            QMessageBox.warning(self, "提示", "序列太短 (至少 50 bp)")
+        sequences = self._parse_multi_fasta(seq_text)
+        if not sequences:
+            QMessageBox.warning(self, "提示", "未检测到有效序列")
             return
         
-        self._update_seq_id_from_text(seq_text)
-        seq_id = self.seq_id_input.text().strip() or self._default_seq_id
+        # 检查序列长度
+        for seq in sequences:
+            if len(seq["sequence"]) < 50:
+                QMessageBox.warning(self, "提示", f"序列 {seq['seq_id']} 太短 (至少 50 bp)")
+                return
         
         # 创建输出目录
         output_dir = self._resolve_output_dir()
@@ -316,20 +329,34 @@ class SequencePage(QWidget):
             return
         
         os.makedirs(output_dir, exist_ok=True)
+        multi_mode = len(sequences) > 1
+        self._batch_mode = multi_mode
         
         # 创建处理器
         identity = self.identity_input.value()
         min_aln_len = self.min_aln_len_input.value()
         db = get_database()
-        self.history_id = db.add_history(
-            mode="sequence",
-            ref_genome_id=ref_genome.get("id"),
-            qry_genome_id=None,
-            input_value=seq_id,
-            identity=identity,
-            output_dir=output_dir,
-            status="running"
-        )
+        self._history_map = {}
+        self._output_dir_map = {}
+        self._last_report_path = ""
+        
+        # 为每个序列创建历史记录和输出目录
+        for seq in sequences:
+            seq_id = seq["seq_id"]
+            safe_name = self._sanitize_path_segment(seq_id) or "sequence"
+            item_output_dir = output_dir if not multi_mode else f"{output_dir}_{safe_name}"
+            os.makedirs(item_output_dir, exist_ok=True)
+            history_id = db.add_history(
+                mode="sequence",
+                ref_genome_id=ref_genome.get("id"),
+                qry_genome_id=None,
+                input_value=seq_id,
+                identity=identity,
+                output_dir=item_output_dir,
+                status="running"
+            )
+            self._history_map[seq_id] = history_id
+            self._output_dir_map[seq_id] = item_output_dir
 
         processor = SequenceProcessor(
             ref_genome=ref_genome["fasta_path"],
@@ -345,10 +372,68 @@ class SequencePage(QWidget):
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)
         
-        self.analysis_thread = SequenceAnalysisThread(processor, sequence, seq_id)
+        output_dir_builder = None
+        if multi_mode:
+            def output_dir_builder(seq: dict) -> str:
+                safe_name = self._sanitize_path_segment(seq["seq_id"]) or "sequence"
+                return f"{output_dir}_{safe_name}"
+        
+        self.analysis_thread = SequenceAnalysisThread(processor, sequences, output_dir_builder=output_dir_builder)
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
+        self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
         self.analysis_thread.start()
+    
+    def _on_item_finished(self, seq_id: str, result: object, error: str):
+        """单个序列分析完成回调"""
+        history_id = self._history_map.get(seq_id)
+        if not history_id:
+            return
+        db = get_database()
+        if result:
+            output_dir = self._output_dir_map.get(seq_id, "") or result.get("output_dir", "")
+            ref_name = self.genome_selector.get_selected_genome().get("name", "")
+            job = {
+                "history_id": history_id,
+                "result": result,
+                "output_dir": output_dir,
+                "mode": "sequence",
+                "ref_name": ref_name,
+                "qry_name": ""
+            }
+            self._enqueue_report_job(job)
+        else:
+            db.update_history(history_id, status="failed")
+
+    def _enqueue_report_job(self, job: dict):
+        """添加报告生成任务到队列"""
+        self._report_queue.append(job)
+        self._process_report_queue()
+
+    def _process_report_queue(self):
+        """处理报告生成队列"""
+        if self._report_worker and self._report_worker.isRunning():
+            return
+        if not self._report_queue:
+            if not self._batch_mode and self._pending_finish_message and self._last_report_path:
+                QMessageBox.information(
+                    self, "分析完成",
+                    f"{self._pending_finish_message}\n\n报告已保存到:\n{self._last_report_path}"
+                )
+                self._pending_finish_message = ""
+            return
+        self._active_report_job = self._report_queue.pop(0)
+        job = self._active_report_job
+        self._report_worker = ReportWorker(
+            job["result"],
+            job["output_dir"],
+            job["mode"],
+            job["ref_name"],
+            job["qry_name"],
+            self
+        )
+        self._report_worker.report_ready.connect(self._on_report_ready)
+        self._report_worker.start()
     
     def _on_analysis_finished(self, success: bool, result: dict, message: str):
         """分析完成回调"""
@@ -356,44 +441,47 @@ class SequencePage(QWidget):
         self.progress_bar.setVisible(False)
         self.progress_label.setText(message)
         
-        if success and result:
-            output_dir = self.output_dir.text().strip()
-            ref_name = self.genome_selector.get_selected_genome().get("name", "")
-            self._pending_finish_message = message
-            self._report_worker = ReportWorker(result, output_dir, "sequence", ref_name, "", self)
-            self._report_worker.report_ready.connect(self._on_report_ready)
-            self._report_worker.start()
+        if success:
+            if self._batch_mode:
+                QMessageBox.information(self, "分析完成", f"{message}\n\n报告生成中...")
+            else:
+                if self._report_worker or self._report_queue:
+                    self._pending_finish_message = message
+                elif self._last_report_path:
+                    QMessageBox.information(
+                        self, "分析完成",
+                        f"{message}\n\n报告已保存到:\n{self._last_report_path}"
+                    )
+                else:
+                    QMessageBox.information(self, "分析完成", message)
         else:
-            if self.history_id:
-                db = get_database()
-                db.update_history(self.history_id, status="failed")
-                self.history_id = None
             QMessageBox.warning(self, "分析失败", message)
 
     def _on_report_ready(self, success: bool, report_path: str, error: str):
-        if self._report_worker:
-            self._report_worker.deleteLater()
-            self._report_worker = None
+        """报告生成完成回调"""
+        job = self._active_report_job
+        self._active_report_job = None
+        if not job:
+            return
+        history_id = job.get("history_id")
+        output_dir = job.get("output_dir", "")
+        db = get_database()
         if success:
-            if self.history_id:
-                db = get_database()
-                db.update_history(
-                    self.history_id,
-                    status="completed",
-                    report_path=report_path,
-                    input_value=Path(report_path).stem
-                )
-                self.history_id = None
-            self._last_report_path = report_path
-            if self._pending_finish_message:
-                QMessageBox.information(
-                    self, "分析完成",
-                    f"{self._pending_finish_message}\n\n报告已保存到:\n{report_path}"
-                )
-                self._pending_finish_message = ""
+            db.update_history(
+                history_id,
+                status="completed",
+                report_path=report_path,
+                output_dir=output_dir
+            )
+            if not self._batch_mode:
+                self._last_report_path = report_path
         else:
-            if self.history_id:
-                db = get_database()
-                db.update_history(self.history_id, status="failed")
-                self.history_id = None
-            QMessageBox.warning(self, "分析失败", error or "报告生成失败")
+            db.update_history(history_id, status="failed")
+        self._report_worker.deleteLater()
+        self._report_worker = None
+        self._process_report_queue()
+
+    @staticmethod
+    def _sanitize_path_segment(text: str) -> str:
+        """清理路径中的非法字符"""
+        return re.sub(r'[<>:"/\\\\|?*]', "_", text).strip()

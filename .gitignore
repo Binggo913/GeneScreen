@@ -17,6 +17,7 @@ env/
 # ========== 本地数据（大文件不进仓库） ==========
 GenomesDB/
 GeneScreenOutput/
+test_sequences.fa
 
 # ========== 构建产物 ==========
 build/
