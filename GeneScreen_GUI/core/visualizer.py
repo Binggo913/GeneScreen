@@ -855,10 +855,20 @@ class LinkviewVisualizer:
         svg_parts.append('  .alignment-primary:hover { fill: #1d4ed8; }')
         svg_parts.append('  .label { font-family: Arial, sans-serif; font-size: 12px; fill: #333; }')
         svg_parts.append('  .primary-label { font-family: Arial, sans-serif; font-size: 9px; fill: #1d4ed8; font-weight: bold; }')
+        svg_parts.append('  .selection-marker { transition: all 0.2s ease; }')
         svg_parts.append('</style>')
         
         # 找出主比对区域（总比对长度最长的 group）
         primary_group = groups[0] if groups else None
+        
+        # 建立 group 到 index 的映射（与 HTML 中的 group-selector 索引一致）
+        # groups 列表的顺序就是下拉框的顺序，直接用列表索引
+        group_index_map = {}  # (chr_name, region_start, region_end) -> index
+        for idx, group in enumerate(groups):
+            group_index_map[(group.chr_name, group.region_start, group.region_end)] = idx
+        
+        # 记录每个区域的位置信息（用于三角形标记定位）
+        region_positions = {}  # index -> {x, y}
         
         # 绘制每个染色体轨道
         y = padding_top
@@ -886,6 +896,16 @@ class LinkviewVisualizer:
                 x_end = track_x + (group.region_end / chr_len) * track_width
                 width = max(x_end - x_start, 3)  # 最小宽度 3px
                 
+                # 获取该 group 的索引
+                group_idx = group_index_map.get((group.chr_name, group.region_start, group.region_end), -1)
+                
+                # 记录位置信息（三角形放在轨道下方，尖朝上指向区域）
+                if group_idx >= 0:
+                    region_positions[group_idx] = {
+                        'x': x_start + width / 2,  # 中心 X
+                        'y': y + track_height + 3   # 轨道底部下方
+                    }
+                
                 # 判断是否为主比对区域
                 is_primary = (primary_group is not None and 
                              group.chr_name == primary_group.chr_name and 
@@ -896,7 +916,7 @@ class LinkviewVisualizer:
                 rect_class = 'alignment-primary' if is_primary else 'alignment'
                 svg_parts.append(f'<rect x="{x_start}" y="{y + 2}" width="{width}" height="{track_height - 4}" class="{rect_class}" '
                                f'data-chr="{chr_name}" data-start="{group.region_start}" data-end="{group.region_end}" '
-                               f'data-len="{group.total_aln_len}" data-primary="{str(is_primary).lower()}"/>')
+                               f'data-len="{group.total_aln_len}" data-primary="{str(is_primary).lower()}" data-index="{group_idx}"/>')
                 
                 # 为主比对添加"主/Primary"标签（支持国际化）
                 if is_primary:
@@ -905,6 +925,19 @@ class LinkviewVisualizer:
                     svg_parts.append(f'<text x="{label_x}" y="{label_y}" text-anchor="middle" class="primary-label" data-zh="主" data-en="Primary">主</text>')
             
             y += track_height + track_gap
+        
+        # 添加选中标记三角形（尖朝上，指向选中区域）
+        first_pos = region_positions.get(0, {'x': 0, 'y': 0})
+        marker_x = first_pos['x']
+        marker_y = first_pos['y']
+        # 尖朝上：顶点在上，底边在下
+        svg_parts.append(f'<polygon id="selection-marker" class="selection-marker" '
+                        f'points="{marker_x},{marker_y} {marker_x-6},{marker_y+8} {marker_x+6},{marker_y+8}" '
+                        f'fill="#e53935" stroke="#c62828" stroke-width="1"/>')
+        
+        # 将位置信息嵌入 SVG 的 data 属性中（供 JS 使用）
+        import json
+        svg_parts.append(f'<script type="application/json" id="region-positions">{json.dumps(region_positions)}</script>')
         
         svg_parts.append('</svg>')
         
@@ -1836,6 +1869,28 @@ class BaseVisualizer:
             // 同步更新统计卡片（如果 updateRegionStats 函数存在）
             if (typeof updateRegionStats === 'function') {{
                 updateRegionStats(indexStr);
+            }}
+            // 更新宏观图中的选中标记
+            updateSelectionMarker(parseInt(index));
+        }}
+        
+        // 更新宏观图中的三角形选中标记（尖朝上）
+        function updateSelectionMarker(index) {{
+            var marker = document.getElementById('selection-marker');
+            var positionsEl = document.getElementById('region-positions');
+            if (!marker || !positionsEl) return;
+            
+            try {{
+                var positions = JSON.parse(positionsEl.textContent);
+                var pos = positions[String(index)];
+                if (pos) {{
+                    var x = pos.x;
+                    var y = pos.y;
+                    // 尖朝上：顶点(x,y)在上，底边两点在下
+                    marker.setAttribute('points', x+','+y+' '+(x-6)+','+(y+8)+' '+(x+6)+','+(y+8));
+                }}
+            }} catch(e) {{
+                console.error('Failed to update selection marker:', e);
             }}
         }}
         
