@@ -1,0 +1,148 @@
+name: Build Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:  # 手动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install nuitka pyside6 pyfaidx biopython requests
+      
+      - name: Build with Nuitka
+        working-directory: GeneScreen_GUI
+        run: python build.py
+      
+      - name: Build installer
+        working-directory: GeneScreen_GUI
+        run: |
+          choco install innosetup -y
+          python build.py --setup
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneScreen-Windows-x64
+          path: GeneScreen_GUI/dist/GeneScreen_Setup_*.exe
+
+  build-macos-arm:
+    runs-on: macos-14  # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install nuitka pyside6 pyfaidx biopython requests
+          brew install create-dmg
+      
+      - name: Build with Nuitka
+        working-directory: GeneScreen_GUI
+        run: |
+          python -m nuitka --standalone --enable-plugin=pyside6 \
+            --output-dir=dist \
+            --include-data-dir=ui/resources=ui/resources \
+            --include-data-files=core/LINKVIEW.py=core/LINKVIEW.py \
+            --include-data-files=core/interval.py=core/interval.py \
+            --macos-create-app-bundle \
+            --macos-app-name=GeneScreen \
+            --assume-yes-for-downloads \
+            main.py
+      
+      - name: Create DMG
+        working-directory: GeneScreen_GUI
+        run: |
+          create-dmg \
+            --volname "GeneScreen" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 200 \
+            --icon "GeneScreen.app" 150 200 \
+            "dist/GeneScreen_macOS_arm64.dmg" \
+            "dist/main.app"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneScreen-macOS-arm64
+          path: GeneScreen_GUI/dist/*.dmg
+
+  build-macos-intel:
+    runs-on: macos-13  # Intel
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install nuitka pyside6 pyfaidx biopython requests
+          brew install create-dmg
+      
+      - name: Build with Nuitka
+        working-directory: GeneScreen_GUI
+        run: |
+          python -m nuitka --standalone --enable-plugin=pyside6 \
+            --output-dir=dist \
+            --include-data-dir=ui/resources=ui/resources \
+            --include-data-files=core/LINKVIEW.py=core/LINKVIEW.py \
+            --include-data-files=core/interval.py=core/interval.py \
+            --macos-create-app-bundle \
+            --macos-app-name=GeneScreen \
+            --assume-yes-for-downloads \
+            main.py
+      
+      - name: Create DMG
+        working-directory: GeneScreen_GUI
+        run: |
+          create-dmg \
+            --volname "GeneScreen" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 200 \
+            --icon "GeneScreen.app" 150 200 \
+            "dist/GeneScreen_macOS_x64.dmg" \
+            "dist/main.app"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GeneScreen-macOS-x64
+          path: GeneScreen_GUI/dist/*.dmg
+
+  release:
+    needs: [build-windows, build-macos-arm, build-macos-intel]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/GeneScreen-Windows-x64/*
+            artifacts/GeneScreen-macOS-arm64/*
+            artifacts/GeneScreen-macOS-x64/*
+          draft: false
+          prerelease: false
