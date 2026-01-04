@@ -430,15 +430,19 @@ class GenomeManagerPage(QWidget):
         manager = get_genome_manager()
         self._batch_genomes = manager.scan_local_genomes(folder)
         
-        # 更新预览
+        # 更新预览（统计注释版本数）
         if self._batch_genomes:
-            with_ann = sum(1 for g in self._batch_genomes if g["annotation"])
-            self.batch_preview.setText(f"找到 {len(self._batch_genomes)} 个基因组文件，其中 {with_ann} 个有匹配的注释文件")
+            total_anns = sum(len(g.get("annotations", [])) for g in self._batch_genomes)
+            with_ann = sum(1 for g in self._batch_genomes if g.get("annotations"))
+            self.batch_preview.setText(
+                f"找到 {len(self._batch_genomes)} 个基因组，"
+                f"其中 {with_ann} 个有注释文件（共 {total_anns} 个注释版本）"
+            )
         else:
             self.batch_preview.setText("未找到基因组文件")
 
     def _add_batch_genomes(self):
-        """批量添加基因组"""
+        """批量添加基因组（支持多注释版本）"""
         if not hasattr(self, '_batch_genomes') or not self._batch_genomes:
             QMessageBox.warning(self, "提示", "请先扫描文件夹")
             return
@@ -448,7 +452,12 @@ class GenomeManagerPage(QWidget):
         fail_count = 0
         
         for genome in self._batch_genomes:
-            success = manager.add_custom(genome["name"], genome["fasta"], genome["annotation"])
+            annotations = genome.get("annotations", [])
+            success = manager._add_genome_with_annotations(
+                genome["name"], 
+                genome["fasta"], 
+                annotations
+            )
             if success:
                 success_count += 1
             else:
@@ -524,12 +533,27 @@ class GenomeManagerPage(QWidget):
             fasta_item.setToolTip(fasta_path)
             self.genome_table.setItem(i, 3, fasta_item)
 
-            ann_path = genome.get("annotation_path", "") or ""
-            ann_display = Path(ann_path).name if ann_path else "-"
+            # 获取所有注释版本
+            annotations = db.get_annotations(genome["id"])
+            if annotations:
+                # 显示所有 source，用换行分隔
+                sources = [ann["source"] for ann in annotations]
+                ann_display = "\n".join(sources)
+                # tooltip 显示完整路径
+                tooltip_lines = [f"{ann['source']}: {ann['annotation_path']}" for ann in annotations]
+                ann_tooltip = "\n".join(tooltip_lines)
+            else:
+                ann_display = "-"
+                ann_tooltip = "无注释文件"
+            
             ann_item = QTableWidgetItem(ann_display)
             ann_item.setFlags(ann_item.flags() & ~Qt.ItemIsEditable)
-            ann_item.setToolTip(ann_path)
+            ann_item.setToolTip(ann_tooltip)
             self.genome_table.setItem(i, 4, ann_item)
+            
+            # 根据注释版本数调整行高
+            if len(annotations) > 1:
+                self.genome_table.setRowHeight(i, 20 * len(annotations))
         
         self.genome_table.blockSignals(False)
         self._update_genome_header_checkbox()
@@ -578,6 +602,15 @@ class GenomeManagerPage(QWidget):
             QMessageBox.warning(self, "提示", "请先勾选要删除的基因组")
             return
         
+        # 统计注释版本数量
+        db = get_database()
+        total_annotations = 0
+        for name in selected_names:
+            genome = db.get_genome(name)
+            if genome:
+                anns = db.get_annotations(genome["id"])
+                total_annotations += len(anns)
+        
         dialog = QDialog(self)
         dialog.setWindowTitle("确认删除")
         dialog.setMinimumWidth(350)
@@ -585,6 +618,12 @@ class GenomeManagerPage(QWidget):
         layout = QVBoxLayout(dialog)
         msg_label = QLabel(f"确定要删除 {len(selected_names)} 个基因组吗？")
         layout.addWidget(msg_label)
+        
+        # 显示注释版本影响
+        if total_annotations > 0:
+            impact_label = QLabel(f"将同时删除 {total_annotations} 个注释版本及其 Gene ID 列表")
+            impact_label.setStyleSheet("color: #f39c12; font-size: 12px;")
+            layout.addWidget(impact_label)
         
         delete_files_checkbox = QCheckBox("同时删除对应文件")
         delete_files_checkbox.setChecked(True)
@@ -704,14 +743,14 @@ class GenomeManagerPage(QWidget):
         name_input = QLineEdit(genome.get("display_name") or genome["name"])
         form.addRow("名称:", name_input)
 
+        # 基因组文件
         fasta_layout = QHBoxLayout()
         fasta_input = QLineEdit(genome.get("fasta_path", ""))
         fasta_input.setReadOnly(True)
-        fasta_input.setProperty("role", "readonly")
         fasta_layout.addWidget(fasta_input, 1)
-        fasta_btn = QPushButton("浏览...")
-        fasta_btn.setFixedSize(44, 22)
-        fasta_btn.setStyleSheet("font-size: 11px; padding: 2px 4px;")
+        fasta_btn = QPushButton("浏览")
+        fasta_btn.setFixedWidth(45)
+        fasta_btn.setStyleSheet("font-size: 11px; padding: 2px 6px;")
         def _pick_fasta():
             start_dir = str(Path(fasta_input.text()).parent) if fasta_input.text().strip() else ""
             path, _ = QFileDialog.getOpenFileName(dialog, "选择 FASTA 文件", start_dir, "FASTA (*.fa *.fasta *.fa.gz)")
@@ -719,35 +758,126 @@ class GenomeManagerPage(QWidget):
                 fasta_input.setText(path)
         fasta_btn.clicked.connect(_pick_fasta)
         fasta_layout.addWidget(fasta_btn)
-        fasta_clear = QPushButton("清空")
-        fasta_clear.setFixedSize(44, 22)
-        fasta_clear.setStyleSheet("font-size: 11px; padding: 2px 4px;")
-        fasta_clear.clicked.connect(lambda: fasta_input.setText(""))
-        fasta_layout.addWidget(fasta_clear)
         form.addRow("基因组文件:", fasta_layout)
 
-        ann_layout = QHBoxLayout()
-        ann_input = QLineEdit(genome.get("annotation_path", "") or "")
-        ann_input.setReadOnly(True)
-        ann_input.setProperty("role", "readonly")
-        ann_layout.addWidget(ann_input, 1)
-        ann_btn = QPushButton("浏览...")
-        ann_btn.setFixedSize(44, 22)
-        ann_btn.setStyleSheet("font-size: 11px; padding: 2px 4px;")
-        def _pick_ann():
-            start_dir = str(Path(ann_input.text()).parent) if ann_input.text().strip() else ""
-            path, _ = QFileDialog.getOpenFileName(dialog, "选择注释文件", start_dir, "注释 (*.gff *.gff3 *.gtf)")
-            if path:
-                ann_input.setText(path)
-        ann_btn.clicked.connect(_pick_ann)
-        ann_layout.addWidget(ann_btn)
-        ann_clear = QPushButton("清空")
-        ann_clear.setFixedSize(44, 22)
-        ann_clear.setStyleSheet("font-size: 11px; padding: 2px 4px;")
-        ann_clear.clicked.connect(lambda: ann_input.setText(""))
-        ann_layout.addWidget(ann_clear)
-        form.addRow("注释文件:", ann_layout)
+        # 注释文件列表
+        ann_group = QGroupBox("注释文件")
+        ann_group_layout = QVBoxLayout(ann_group)
+        ann_group_layout.setSpacing(8)
+        ann_group_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 存储注释行的容器
+        ann_rows_widget = QWidget()
+        ann_rows_layout = QVBoxLayout(ann_rows_widget)
+        ann_rows_layout.setContentsMargins(0, 0, 0, 0)
+        ann_rows_layout.setSpacing(6)
+        
+        # 按钮样式
+        small_btn_style = "font-size: 11px; padding: 2px 6px; min-width: 36px;"
+        del_btn_style = "font-size: 11px; padding: 2px 6px; min-width: 36px; background-color: #e74c3c;"
+        
+        def _create_ann_row(ann_id, source, ann_path):
+            """创建一个注释版本行（来源 + 路径输入框 + 浏览 + 删除）"""
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            
+            # 来源标签
+            source_label = QLabel(source)
+            source_label.setFixedWidth(100)
+            source_label.setStyleSheet("font-size: 12px;")
+            row_layout.addWidget(source_label)
+            
+            # 路径输入框（只读，显示完整路径）
+            path_input = QLineEdit(ann_path)
+            path_input.setReadOnly(True)
+            path_input.setProperty("ann_id", ann_id)
+            row_layout.addWidget(path_input, 1)
+            
+            # 浏览按钮
+            browse_btn = QPushButton("浏览")
+            browse_btn.setStyleSheet(small_btn_style)
+            browse_btn.setFixedWidth(45)
+            def _browse():
+                start_dir = str(Path(path_input.text()).parent) if path_input.text().strip() else ""
+                path, _ = QFileDialog.getOpenFileName(dialog, "选择注释文件", start_dir, "注释 (*.gff *.gff3 *.gtf *.gff.gz)")
+                if path:
+                    path_input.setText(path)
+                    db.update_annotation(ann_id, annotation_path=path)
+            browse_btn.clicked.connect(_browse)
+            row_layout.addWidget(browse_btn)
+            
+            # 删除按钮
+            del_btn = QPushButton("删除")
+            del_btn.setStyleSheet(del_btn_style)
+            del_btn.setFixedWidth(45)
+            def _delete():
+                db.delete_annotation(ann_id)
+                _refresh_ann_list()
+            del_btn.clicked.connect(_delete)
+            row_layout.addWidget(del_btn)
+            
+            return row_widget
+        
+        def _create_new_ann_row():
+            """创建新增注释行（只有新增按钮）"""
+            row_widget = QWidget()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(6)
+            
+            row_layout.addStretch()
+            
+            # 新增按钮（点击后选择文件并直接添加）
+            add_btn = QPushButton("+ 新增注释")
+            add_btn.setStyleSheet(small_btn_style)
+            add_btn.setFixedWidth(80)
+            def _add_new():
+                path, _ = QFileDialog.getOpenFileName(dialog, "选择注释文件", "", "注释 (*.gff *.gff3 *.gtf *.gff.gz)")
+                if not path:
+                    return
+                # 自动解析来源
+                from core.genome_manager import GenomeManager
+                parsed_source, _ = GenomeManager._parse_annotation_name(Path(path).name)
+                source = parsed_source or "version1"
+                
+                result = db.add_annotation(genome["id"], source, path)
+                if result == -1:
+                    QMessageBox.warning(dialog, "提示", f"来源 '{source}' 已存在")
+                    return
+                _refresh_ann_list()
+                get_genome_manager().enqueue_gene_id_list(genome["name"], path, source)
+            add_btn.clicked.connect(_add_new)
+            row_layout.addWidget(add_btn)
+            
+            return row_widget
+        
+        def _refresh_ann_list():
+            """刷新注释列表"""
+            # 清空现有行
+            while ann_rows_layout.count():
+                item = ann_rows_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            
+            # 添加现有注释行
+            anns = db.get_annotations(genome["id"])
+            for ann in anns:
+                row = _create_ann_row(ann["id"], ann["source"], ann["annotation_path"])
+                ann_rows_layout.addWidget(row)
+            
+            # 添加新增行
+            new_row = _create_new_ann_row()
+            ann_rows_layout.addWidget(new_row)
+        
+        # 初始化
+        _refresh_ann_list()
+        
+        ann_group_layout.addWidget(ann_rows_widget)
+        layout.addWidget(ann_group)
 
+        # 按钮行
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         cancel_btn = QPushButton("取消")
@@ -760,14 +890,13 @@ class GenomeManagerPage(QWidget):
         def _save():
             display_name = name_input.text().strip()
             fasta_path = fasta_input.text().strip()
-            ann_path = ann_input.text().strip()
             if not display_name:
                 QMessageBox.warning(dialog, "提示", "名称不能为空")
                 return
             if not fasta_path:
                 QMessageBox.warning(dialog, "提示", "基因组文件不能为空")
                 return
-            db.update_genome(genome["name"], display_name=display_name, fasta_path=fasta_path, annotation_path=ann_path or None)
+            db.update_genome(genome["name"], display_name=display_name, fasta_path=fasta_path)
             dialog.accept()
 
         save_btn.clicked.connect(_save)
@@ -1034,32 +1163,51 @@ class GenomeManagerPage(QWidget):
         self._process_download_queue()
 
     def _enqueue_gene_list_status(self, item: dict) -> None:
+        """将 gene list 生成任务加入状态显示"""
         genome_id = item.get("id")
         if not genome_id:
             return
         if any(p.get("id") == genome_id for p in self._gene_list_pending):
             return
-        genome = get_database().get_genome(genome_id)
+        
+        db = get_database()
+        genome = db.get_genome(genome_id)
         if not genome:
             return
-        annotation_path = genome.get("annotation_path")
-        if not annotation_path:
+        
+        # 获取所有注释版本
+        annotations = db.get_annotations(genome["id"])
+        if not annotations:
             return
-        list_path = Path(get_genome_manager().get_gene_id_list_path(genome_id))
-        try:
-            if list_path.exists() and list_path.stat().st_size > 0:
-                return
-        except OSError:
-            return
+        
         display_name = genome.get("display_name") or item.get("name") or genome_id
-        self._gene_list_pending.append({
-            "id": genome_id,
-            "name": display_name,
-            "status": "生成中",
-            "stage": "生成gene list",
-            "gene_list_path": str(list_path)
-        })
-        if not self._gene_list_timer.isActive():
+        gm = get_genome_manager()
+        
+        # 为每个注释版本创建 gene list 生成任务
+        for ann in annotations:
+            source = ann["source"]
+            list_path = Path(gm.get_gene_id_list_path(genome_id, source))
+            try:
+                if list_path.exists() and list_path.stat().st_size > 0:
+                    continue
+            except OSError:
+                continue
+            
+            task_id = f"{genome_id}:{source}"
+            if any(p.get("id") == task_id for p in self._gene_list_pending):
+                continue
+            
+            self._gene_list_pending.append({
+                "id": task_id,
+                "genome_id": genome_id,
+                "source": source,
+                "name": f"{display_name} [{source}]",
+                "status": "生成中",
+                "stage": "生成gene list",
+                "gene_list_path": str(list_path)
+            })
+        
+        if self._gene_list_pending and not self._gene_list_timer.isActive():
             self._gene_list_timer.start()
 
     def _check_gene_list_ready(self) -> None:

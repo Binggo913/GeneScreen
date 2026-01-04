@@ -16,8 +16,12 @@ from typing import Iterable, List
 from utils import run_subprocess
 
 
-GENE_ID_LIST_SUFFIX = ".gene_ids.json"
-LEGACY_LIST_SUFFIX = ".gene_ids.txt"
+# 文件后缀常量
+JSON_LIST_SUFFIX = ".gene_ids.json"   # 旧 JSON 格式（兼容）
+TXT_LIST_SUFFIX = ".gene_ids.txt"     # 新 TXT 格式（当前使用）
+# 兼容旧代码
+GENE_ID_LIST_SUFFIX = JSON_LIST_SUFFIX
+LEGACY_LIST_SUFFIX = TXT_LIST_SUFFIX
 
 
 def read_gene_id_list(path: str | Path) -> List[str]:

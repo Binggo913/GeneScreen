@@ -90,48 +90,82 @@ class GenomeManager:
                 return filename[:-len(suffix)]
         return Path(filename).stem
 
-    def scan_local_genomes(self, root: Path) -> List[Dict[str, Optional[str]]]:
+    @staticmethod
+    def _parse_annotation_name(filename: str) -> Tuple[str, str]:
+        """
+        解析注释文件名，提取 source 和 species
+        
+        格式：{source}.{species}.{ext} 或 {species}.{ext}
+        返回：(source, species)
+        """
+        # 去掉扩展名
+        base = filename
+        for ext in sorted(ANN_EXTS, key=len, reverse=True):
+            if base.lower().endswith(ext):
+                base = base[:-len(ext)]
+                break
+        
+        parts = base.split('.', 1)
+        if len(parts) == 2:
+            # 有 source 前缀：igv.ZS97 -> ('igv', 'ZS97')
+            return parts[0], parts[1]
+        # 无前缀：ZS97 -> ('version1', 'ZS97')
+        return 'version1', parts[0]
+
+    def scan_local_genomes(self, root: Path) -> List[Dict[str, Any]]:
+        """
+        扫描本地基因组，支持多注释版本
+        
+        返回格式：[{name, fasta, annotations: [{source, path}]}]
+        """
         root = Path(root)
         if not root.exists():
             return []
 
-        ann_by_dir: Dict[Path, Dict[str, Path]] = {}
+        # 按目录收集注释文件：{dir: {species_lower: [(source, path)]}}
+        ann_by_dir: Dict[Path, Dict[str, List[Tuple[str, Path]]]] = {}
         fasta_files: List[Path] = []
 
         for f in root.rglob("*"):
             if not f.is_file():
                 continue
+            # 跳过正在下载的目录
+            if (f.parent / ".downloading").exists():
+                continue
             name_lower = f.name.lower()
             if any(name_lower.endswith(ext) for ext in FASTA_EXTS):
                 fasta_files.append(f)
             elif any(name_lower.endswith(ext) for ext in ANN_EXTS):
-                base = self._strip_known_suffix(f.name, ANN_EXTS)
-                ann_by_dir.setdefault(f.parent, {})[base.lower()] = f
+                source, species = self._parse_annotation_name(f.name)
+                ann_by_dir.setdefault(f.parent, {}).setdefault(species.lower(), []).append((source, f))
 
-        genome_map: Dict[Tuple[Path, str], Dict[str, Optional[str]]] = {}
+        genome_map: Dict[Tuple[Path, str], Dict[str, Any]] = {}
         for fasta in fasta_files:
             base = self._strip_known_suffix(fasta.name, FASTA_EXTS)
-            ann_file = ann_by_dir.get(fasta.parent, {}).get(base.lower())
             key = (fasta.parent, base.lower())
             fasta_path = str(fasta)
+            
+            # 获取该目录下匹配的所有注释
+            ann_list = ann_by_dir.get(fasta.parent, {}).get(base.lower(), [])
+            annotations = [{"source": src, "path": str(p)} for src, p in ann_list]
+            
             existing = genome_map.get(key)
             if existing:
+                # 优先非压缩 FASTA
                 if existing["fasta"].lower().endswith(".gz") and not fasta_path.lower().endswith(".gz"):
-                    genome_map[key] = {
-                        "name": base,
-                        "fasta": fasta_path,
-                        "annotation": str(ann_file) if ann_file else None
-                    }
+                    genome_map[key]["fasta"] = fasta_path
                 continue
+            
             genome_map[key] = {
                 "name": base,
                 "fasta": fasta_path,
-                "annotation": str(ann_file) if ann_file else None
+                "annotations": annotations
             }
 
         return list(genome_map.values())
 
     def sync_cache_dir(self) -> Tuple[int, int]:
+        """同步缓存目录，支持多注释版本"""
         if self._syncing:
             return 0, 0
         self._syncing = True
@@ -143,12 +177,15 @@ class GenomeManager:
             for genome in genomes:
                 name = genome["name"]
                 fasta_path = os.path.abspath(genome["fasta"])
-                ann_path = os.path.abspath(genome["annotation"]) if genome["annotation"] else None
+                annotations = genome.get("annotations", [])
                 existing = self.db.get_genome(name)
+                
                 if existing:
+                    genome_id = existing["id"]
                     updates = {}
                     existing_fasta = existing.get("fasta_path")
                     preferred_fasta = existing_fasta or fasta_path
+                    
                     if existing_fasta:
                         existing_is_gz = existing_fasta.lower().endswith(".gz")
                         new_is_gz = fasta_path.lower().endswith(".gz")
@@ -158,17 +195,22 @@ class GenomeManager:
                             preferred_fasta = fasta_path
                         elif not existing_is_gz and new_is_gz:
                             preferred_fasta = existing_fasta
-                        elif existing_is_gz and new_is_gz:
-                            preferred_fasta = existing_fasta
                         else:
                             preferred_fasta = fasta_path
 
                     if existing_fasta != preferred_fasta:
                         updates["fasta_path"] = preferred_fasta
-                    if ann_path and existing.get("annotation_path") != ann_path:
-                        updates["annotation_path"] = ann_path
-                    if ann_path:
-                        self.enqueue_gene_id_list(name, ann_path)
+                    
+                    # 同步注释版本到 genome_annotations 表
+                    for ann in annotations:
+                        source = ann["source"]
+                        ann_path = os.path.abspath(ann["path"])
+                        existing_ann = self.db.get_annotation_by_source(genome_id, source)
+                        if not existing_ann:
+                            self.db.add_annotation(genome_id, source, ann_path)
+                            updated += 1
+                        self.enqueue_gene_id_list(name, ann_path, source)
+                    
                     if updates:
                         effective_fasta = updates.get("fasta_path") or existing_fasta or fasta_path
                         if effective_fasta:
@@ -177,7 +219,10 @@ class GenomeManager:
                         updated += 1
                     continue
 
-                if self.add_custom(name, fasta_path, ann_path):
+                # 新增基因组
+                # 取第一个注释作为默认（兼容旧逻辑）
+                default_ann = annotations[0]["path"] if annotations else None
+                if self._add_genome_with_annotations(name, fasta_path, annotations):
                     added += 1
         finally:
             self._syncing = False
@@ -185,6 +230,51 @@ class GenomeManager:
         if added or updated:
             print(f"[INFO] 基因组库同步完成: 新增 {added} 个, 更新 {updated} 个")
         return added, updated
+
+    def _add_genome_with_annotations(
+        self,
+        name: str,
+        fasta_path: str,
+        annotations: List[Dict[str, str]],
+        source: str = "custom",
+        species: Optional[str] = None,
+        description: Optional[str] = None
+    ) -> bool:
+        """添加基因组及其注释版本"""
+        if not os.path.exists(fasta_path):
+            print(f"[ERROR] 基因组文件不存在: {fasta_path}")
+            return False
+        
+        if self.db.genome_exists(name):
+            print(f"[ERROR] 基因组 '{name}' 已存在")
+            return False
+        
+        # 创建索引
+        self._ensure_fasta_index(fasta_path)
+        
+        # 取第一个注释作为默认（兼容旧字段）
+        default_ann = annotations[0]["path"] if annotations else None
+        
+        # 添加基因组
+        genome_id = self.db.add_genome(
+            name=name,
+            fasta_path=os.path.abspath(fasta_path),
+            annotation_path=os.path.abspath(default_ann) if default_ann else None,
+            source=source,
+            species=species,
+            description=description
+        )
+        
+        # 添加所有注释版本
+        for ann in annotations:
+            ann_source = ann["source"]
+            ann_path = os.path.abspath(ann["path"])
+            if os.path.exists(ann_path):
+                self.db.add_annotation(genome_id, ann_source, ann_path)
+                self.enqueue_gene_id_list(name, ann_path, ann_source)
+        
+        print(f"[INFO] 已添加基因组: {name} (注释版本: {len(annotations)})")
+        return True
 
     # ==================== 基因组获取 ====================
 
@@ -260,7 +350,7 @@ class GenomeManager:
         self._ensure_fasta_index(final_genome_path)
 
         # 保存到数据库
-        self.db.add_genome(
+        genome_id = self.db.add_genome(
             name=name,
             fasta_path=os.path.abspath(final_genome_path),
             annotation_path=os.path.abspath(final_annotation_path) if final_annotation_path else None,
@@ -268,7 +358,12 @@ class GenomeManager:
             species=species,
             description=description
         )
-        self.enqueue_gene_id_list(name, final_annotation_path)
+        
+        # 添加注释版本记录
+        if final_annotation_path:
+            self.db.add_annotation(genome_id, "version1", os.path.abspath(final_annotation_path))
+            self.enqueue_gene_id_list(name, final_annotation_path, "version1")
+        
         print(f"[INFO] 已添加自定义基因组: {name}")
         return True
 
@@ -377,119 +472,132 @@ class GenomeManager:
                 progress_callback(100, "已存在")
             return True
 
-        # 创建目录
+        # 创建目录并放置下载中标记
         genome_dir = self.cache_dir / species_name
         genome_dir.mkdir(parents=True, exist_ok=True)
+        downloading_marker = genome_dir / ".downloading"
+        downloading_marker.touch()
 
-        assembly = species_info.get("assembly") or ""
-        release = species_info.get("release") or "59"
-        species_cap = species_name[0].upper() + species_name[1:]
+        try:
+            assembly = species_info.get("assembly") or ""
+            release = species_info.get("release") or "59"
+            species_cap = species_name[0].upper() + species_name[1:]
 
-        if progress_callback:
-            progress_callback(5, "下载FASTA")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+            if progress_callback:
+                progress_callback(5, "下载FASTA")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
 
-        # 下载 FASTA
-        fasta_filename = f"{species_cap}.{assembly}.dna.toplevel.fa.gz"
-        fasta_url = f"{ENSEMBL_FTP_BASE}/fasta/{species_name}/dna/{fasta_filename}"
-        fasta_gz = genome_dir / fasta_filename
-        fasta_file = genome_dir / f"{species_name}.fa"
+            # 下载 FASTA
+            fasta_filename = f"{species_cap}.{assembly}.dna.toplevel.fa.gz"
+            fasta_url = f"{ENSEMBL_FTP_BASE}/fasta/{species_name}/dna/{fasta_filename}"
+            fasta_gz = genome_dir / fasta_filename
+            fasta_file = genome_dir / f"{species_name}.fa"
 
-        print(f"[INFO] 下载 FASTA: {fasta_url}")
-        if not self._download_file(fasta_url, str(fasta_gz), cancel_callback=cancel_callback):
-            # 尝试 dna_sm 格式
-            fasta_filename_alt = f"{species_cap}.{assembly}.dna_sm.toplevel.fa.gz"
-            fasta_url_alt = f"{ENSEMBL_FTP_BASE}/fasta/{species_name}/dna/{fasta_filename_alt}"
-            print(f"[INFO] 尝试备用 URL: {fasta_url_alt}")
-            fasta_gz = genome_dir / fasta_filename_alt
-            if not self._download_file(fasta_url_alt, str(fasta_gz), cancel_callback=cancel_callback):
+            print(f"[INFO] 下载 FASTA: {fasta_url}")
+            if not self._download_file(fasta_url, str(fasta_gz), cancel_callback=cancel_callback):
+                # 尝试 dna_sm 格式
+                fasta_filename_alt = f"{species_cap}.{assembly}.dna_sm.toplevel.fa.gz"
+                fasta_url_alt = f"{ENSEMBL_FTP_BASE}/fasta/{species_name}/dna/{fasta_filename_alt}"
+                print(f"[INFO] 尝试备用 URL: {fasta_url_alt}")
+                fasta_gz = genome_dir / fasta_filename_alt
+                if not self._download_file(fasta_url_alt, str(fasta_gz), cancel_callback=cancel_callback):
+                    return False
+
+            if progress_callback:
+                progress_callback(30, "解压FASTA")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
+
+            # 解压 FASTA
+            print("[INFO] 解压 FASTA...")
+            if not self._gunzip(str(fasta_gz), str(fasta_file)):
                 return False
 
-        if progress_callback:
-            progress_callback(30, "解压FASTA")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+            if progress_callback:
+                progress_callback(45, "构建索引")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
 
-        # 解压 FASTA
-        print("[INFO] 解压 FASTA...")
-        if not self._gunzip(str(fasta_gz), str(fasta_file)):
-            return False
+            # 创建索引
+            self._ensure_fasta_index(str(fasta_file))
 
-        if progress_callback:
-            progress_callback(45, "构建索引")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+            if progress_callback:
+                progress_callback(55, "下载GFF")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
 
-        # 创建索引
-        self._ensure_fasta_index(str(fasta_file))
+            # 下载 GFF3 - 命名格式：ensembl_plants.{species_name}.gff3
+            annotation_file = None
+            ann_source = "ensembl_plants"
+            for rel in [release, "62", "61", "60", "59", "58", "57"]:
+                gff_filename = f"{species_cap}.{assembly}.{rel}.gff3.gz"
+                gff_url = f"{ENSEMBL_FTP_BASE}/gff3/{species_name}/{gff_filename}"
+                gff_gz = genome_dir / gff_filename
+                gff_file = genome_dir / f"{ann_source}.{species_name}.gff3"
 
-        if progress_callback:
-            progress_callback(55, "下载GFF")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+                print(f"[INFO] 下载 GFF3: {gff_url}")
+                if self._download_file(gff_url, str(gff_gz), cancel_callback=cancel_callback):
+                    if progress_callback:
+                        progress_callback(80, "解压GFF")
+                    if cancel_callback and cancel_callback():
+                        raise InterruptedError("下载已取消")
+                    print("[INFO] 解压 GFF3...")
+                    if not self._gunzip(str(gff_gz), str(gff_file)):
+                        return False
+                    annotation_file = gff_file
+                    break
 
-        # 下载 GFF3
-        annotation_file = None
-        for rel in [release, "62", "61", "60", "59", "58", "57"]:
-            gff_filename = f"{species_cap}.{assembly}.{rel}.gff3.gz"
-            gff_url = f"{ENSEMBL_FTP_BASE}/gff3/{species_name}/{gff_filename}"
-            gff_gz = genome_dir / gff_filename
-            gff_file = genome_dir / f"{species_name}.gff3"
+                # 尝试 abinitio 版本
+                gff_filename_ab = f"{species_cap}.{assembly}.{rel}.abinitio.gff3.gz"
+                gff_url_ab = f"{ENSEMBL_FTP_BASE}/gff3/{species_name}/{gff_filename_ab}"
+                gff_gz_ab = genome_dir / gff_filename_ab
 
-            print(f"[INFO] 下载 GFF3: {gff_url}")
-            if self._download_file(gff_url, str(gff_gz), cancel_callback=cancel_callback):
-                if progress_callback:
-                    progress_callback(80, "解压GFF")
-                if cancel_callback and cancel_callback():
-                    raise InterruptedError("下载已取消")
-                print("[INFO] 解压 GFF3...")
-                if not self._gunzip(str(gff_gz), str(gff_file)):
-                    return False
-                annotation_file = gff_file
-                break
+                if self._download_file(gff_url_ab, str(gff_gz_ab), cancel_callback=cancel_callback):
+                    if progress_callback:
+                        progress_callback(80, "解压GFF")
+                    if cancel_callback and cancel_callback():
+                        raise InterruptedError("下载已取消")
+                    print("[INFO] 解压 GFF3 (abinitio)...")
+                    if not self._gunzip(str(gff_gz_ab), str(gff_file)):
+                        return False
+                    annotation_file = gff_file
+                    break
 
-            # 尝试 abinitio 版本
-            gff_filename_ab = f"{species_cap}.{assembly}.{rel}.abinitio.gff3.gz"
-            gff_url_ab = f"{ENSEMBL_FTP_BASE}/gff3/{species_name}/{gff_filename_ab}"
-            gff_gz_ab = genome_dir / gff_filename_ab
+            if not annotation_file:
+                print("[WARN] GFF3 注释文件下载失败，基因组仍可使用")
 
-            if self._download_file(gff_url_ab, str(gff_gz_ab), cancel_callback=cancel_callback):
-                if progress_callback:
-                    progress_callback(80, "解压GFF")
-                if cancel_callback and cancel_callback():
-                    raise InterruptedError("下载已取消")
-                print("[INFO] 解压 GFF3 (abinitio)...")
-                if not self._gunzip(str(gff_gz_ab), str(gff_file)):
-                    return False
-                annotation_file = gff_file
-                break
+            if progress_callback:
+                progress_callback(90, "保存数据")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
 
-        if not annotation_file:
-            print("[WARN] GFF3 注释文件下载失败，基因组仍可使用")
+            # 保存到数据库
+            genome_id = self.db.add_genome(
+                name=species_name,
+                fasta_path=str(fasta_file),
+                annotation_path=str(annotation_file) if annotation_file else None,
+                display_name=species_info.get("display_name") or "",
+                source="ensembl_plants",
+                assembly=assembly,
+                species=species_info.get("display_name") or species_name
+            )
+            
+            # 添加注释版本记录
+            if annotation_file:
+                self.db.add_annotation(genome_id, ann_source, str(annotation_file))
+                self.enqueue_gene_id_list(species_name, str(annotation_file), ann_source)
 
-        if progress_callback:
-            progress_callback(90, "保存数据")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+            if progress_callback:
+                progress_callback(100, "完成")
 
-        # 保存到数据库
-        self.db.add_genome(
-            name=species_name,
-            fasta_path=str(fasta_file),
-            annotation_path=str(annotation_file) if annotation_file else None,
-            display_name=species_info.get("display_name") or "",
-            source="ensembl_plants",
-            assembly=assembly,
-            species=species_info.get("display_name") or species_name
-        )
-        self.enqueue_gene_id_list(species_name, str(annotation_file) if annotation_file else None)
-
-        if progress_callback:
-            progress_callback(100, "完成")
-
-        print(f"[INFO] 基因组 {species_name} 下载完成")
-        return True
+            print(f"[INFO] 基因组 {species_name} 下载完成")
+            return True
+        
+        finally:
+            # 确保标记被删除
+            if downloading_marker.exists():
+                downloading_marker.unlink()
 
     # ==================== IGV 基因组 ====================
 
@@ -543,83 +651,96 @@ class GenomeManager:
                 progress_callback(100, "已存在")
             return True
 
-        # 创建基因组目录
+        # 创建基因组目录并放置下载中标记
         genome_dir = self.cache_dir / genome_id
         genome_dir.mkdir(parents=True, exist_ok=True)
+        downloading_marker = genome_dir / ".downloading"
+        downloading_marker.touch()
 
-        # 检查是否有注释文件
-        has_annotation = False
-        tracks = igv_genome.get("tracks", [])
-        for track in tracks:
-            if track.get("format") in ["gff3", "gff", "gtf"]:
-                has_annotation = True
-                break
-
-        # 下载 FASTA
-        fasta_url = igv_genome.get("fastaURL")
-        if not fasta_url:
-            print(f"[ERROR] 基因组 {genome_id} 没有 FASTA URL")
-            return False
-
-        if progress_callback:
-            progress_callback(5, "下载FASTA")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
-        
-        fasta_file = genome_dir / f"{genome_id}.fa"
-        print(f"[INFO] 下载 FASTA: {fasta_url}")
-        if not self._download_file(fasta_url, str(fasta_file), cancel_callback=cancel_callback):
-            return False
-
-        if progress_callback:
-            progress_callback(40, "构建索引")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
-        
-        # 创建索引
-        self._ensure_fasta_index(str(fasta_file))
-
-        if progress_callback:
-            progress_callback(60, "索引完成")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
-
-        # 下载注释（如果有）
-        annotation_file = None
-        if has_annotation:
+        try:
+            # 检查是否有注释文件
+            has_annotation = False
+            tracks = igv_genome.get("tracks", [])
             for track in tracks:
                 if track.get("format") in ["gff3", "gff", "gtf"]:
-                    ann_url = track.get("url")
-                    if ann_url:
-                        if progress_callback:
-                            progress_callback(70, "下载注释")
-                        ext = track.get("format", "gff3")
-                        annotation_file = genome_dir / f"{genome_id}.{ext}"
-                        print(f"[INFO] 下载注释: {ann_url}")
-                        self._download_file(ann_url, str(annotation_file), cancel_callback=cancel_callback)
-                        break
+                    has_annotation = True
+                    break
 
-        if progress_callback:
-            progress_callback(90, "保存数据")
-        if cancel_callback and cancel_callback():
-            raise InterruptedError("下载已取消")
+            # 下载 FASTA
+            fasta_url = igv_genome.get("fastaURL")
+            if not fasta_url:
+                print(f"[ERROR] 基因组 {genome_id} 没有 FASTA URL")
+                return False
 
-        # 保存到数据库
-        self.db.add_genome(
-            name=genome_id,
-            fasta_path=str(fasta_file),
-            annotation_path=str(annotation_file) if annotation_file else None,
-            display_name=igv_genome.get("name") or genome_id,
-            source="igv",
-            description=igv_genome.get("description")
-        )
-        self.enqueue_gene_id_list(genome_id, str(annotation_file) if annotation_file else None)
+            if progress_callback:
+                progress_callback(5, "下载FASTA")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
+            
+            fasta_file = genome_dir / f"{genome_id}.fa"
+            print(f"[INFO] 下载 FASTA: {fasta_url}")
+            if not self._download_file(fasta_url, str(fasta_file), cancel_callback=cancel_callback):
+                return False
 
-        if progress_callback:
-            progress_callback(100, "完成")
+            if progress_callback:
+                progress_callback(40, "构建索引")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
+            
+            # 创建索引
+            self._ensure_fasta_index(str(fasta_file))
 
-        print(f"[INFO] 基因组 {genome_id} 下载完成")
-        return True
+            if progress_callback:
+                progress_callback(60, "索引完成")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
+
+            # 下载注释（如果有）- 命名格式：igv.{genome_id}.{ext}
+            annotation_file = None
+            ann_source = "igv"
+            if has_annotation:
+                for track in tracks:
+                    if track.get("format") in ["gff3", "gff", "gtf"]:
+                        ann_url = track.get("url")
+                        if ann_url:
+                            if progress_callback:
+                                progress_callback(70, "下载注释")
+                            ext = track.get("format", "gff3")
+                            annotation_file = genome_dir / f"{ann_source}.{genome_id}.{ext}"
+                            print(f"[INFO] 下载注释: {ann_url}")
+                            self._download_file(ann_url, str(annotation_file), cancel_callback=cancel_callback)
+                            break
+
+            if progress_callback:
+                progress_callback(90, "保存数据")
+            if cancel_callback and cancel_callback():
+                raise InterruptedError("下载已取消")
+
+            # 保存到数据库
+            genome_db_id = self.db.add_genome(
+                name=genome_id,
+                fasta_path=str(fasta_file),
+                annotation_path=str(annotation_file) if annotation_file else None,
+                display_name=igv_genome.get("name") or genome_id,
+                source="igv",
+                description=igv_genome.get("description")
+            )
+            
+            # 添加注释版本记录
+            if annotation_file:
+                self.db.add_annotation(genome_db_id, ann_source, str(annotation_file))
+                self.enqueue_gene_id_list(genome_id, str(annotation_file), ann_source)
+
+            if progress_callback:
+                progress_callback(100, "完成")
+
+            print(f"[INFO] 基因组 {genome_id} 下载完成")
+            return True
+        
+        finally:
+            # 确保标记被删除
+            if downloading_marker.exists():
+                downloading_marker.unlink()
 
     # ==================== 通用方法 ====================
 
@@ -686,10 +807,11 @@ class GenomeManager:
         except OSError:
             return False
 
-    def enqueue_gene_id_list(self, name: str, annotation_path: Optional[str]) -> None:
+    def enqueue_gene_id_list(self, name: str, annotation_path: Optional[str], source: str = "version1") -> None:
+        """将 gene id 列表生成任务加入队列"""
         if not annotation_path or not os.path.exists(annotation_path):
             return
-        list_path = self._gene_id_list_path(name)
+        list_path = self._gene_id_list_path(name, source)
         try:
             ann_mtime = os.path.getmtime(annotation_path)
             if list_path.exists() and list_path.stat().st_size > 0:
@@ -698,57 +820,92 @@ class GenomeManager:
         except OSError:
             return
 
+        job_key = f"{name}:{source}"
         with self._gene_id_lock:
-            if name in self._gene_id_jobs:
+            if job_key in self._gene_id_jobs:
                 return
-            self._gene_id_jobs.add(name)
-        self._gene_id_queue.put((name, annotation_path))
+            self._gene_id_jobs.add(job_key)
+        self._gene_id_queue.put((name, annotation_path, source))
 
-    def get_gene_id_list_path(self, name: str) -> str:
-        return str(self._gene_id_list_path(name))
+    def get_annotations(self, name: str) -> List[Dict[str, Any]]:
+        """获取基因组的所有注释版本"""
+        genome = self.db.get_genome(name)
+        if not genome:
+            return []
+        return self.db.get_annotations(genome["id"])
+
+    def get_gene_id_list_path(self, name: str, source: str = "version1") -> str:
+        """获取 gene id 列表文件路径"""
+        return str(self._gene_id_list_path(name, source))
 
     def _gene_id_worker_loop(self) -> None:
         while True:
-            name, annotation_path = self._gene_id_queue.get()
+            item = self._gene_id_queue.get()
+            # 兼容旧格式 (name, path) 和新格式 (name, path, source)
+            if len(item) == 2:
+                name, annotation_path = item
+                source = "version1"
+            else:
+                name, annotation_path, source = item
+            
+            job_key = f"{name}:{source}"
             try:
-                gene_ids_path, gene_id_count = self._ensure_gene_id_list(name, annotation_path)
+                gene_ids_path, gene_id_count = self._ensure_gene_id_list(name, annotation_path, source)
                 if gene_ids_path:
-                    self.db.update_genome(
-                        name,
-                        notify=False,
-                        gene_ids_path=gene_ids_path,
-                        gene_id_count=gene_id_count
-                    )
+                    # 更新 genome_annotations 表
+                    genome = self.db.get_genome(name)
+                    if genome:
+                        ann = self.db.get_annotation_by_source(genome["id"], source)
+                        if ann:
+                            self.db.update_annotation(
+                                ann["id"],
+                                gene_ids_path=gene_ids_path,
+                                gene_id_count=gene_id_count
+                            )
             except Exception as e:
                 print(f"[WARNING] Gene ID 列表生成失败: {annotation_path} ({e})")
             finally:
                 with self._gene_id_lock:
-                    self._gene_id_jobs.discard(name)
+                    self._gene_id_jobs.discard(job_key)
                 self._gene_id_queue.task_done()
 
-    def _gene_id_list_path(self, name: str) -> Path:
+    def _gene_id_list_path(self, name: str, source: str = "version1") -> Path:
+        """生成 gene id 列表文件路径：{source}.{name}.gene_ids.txt"""
         genome_dir = self.cache_dir / name
         genome_dir.mkdir(parents=True, exist_ok=True)
-        return genome_dir / f"{name}{GENE_ID_LIST_SUFFIX}"
+        return genome_dir / f"{source}.{name}.gene_ids.txt"
 
     def _ensure_gene_id_list(
         self,
         name: str,
-        annotation_path: Optional[str]
+        annotation_path: Optional[str],
+        source: str = "version1"
     ) -> Tuple[Optional[str], Optional[int]]:
+        """确保 gene id 列表存在且最新"""
         if not annotation_path or not os.path.exists(annotation_path):
             return None, None
 
-        list_path = self._gene_id_list_path(name)
-        legacy_path = list_path.parent / f"{name}{LEGACY_LIST_SUFFIX}"
+        list_path = self._gene_id_list_path(name, source)
+        # 兼容旧格式
+        legacy_path = self.cache_dir / name / f"{name}{GENE_ID_LIST_SUFFIX}"
+        legacy_txt = self.cache_dir / name / f"{name}{LEGACY_LIST_SUFFIX}"
+        
         try:
             ann_mtime = os.path.getmtime(annotation_path)
             if list_path.exists() and list_path.stat().st_size > 0:
                 if list_path.stat().st_mtime >= ann_mtime:
                     return str(list_path), count_gene_id_list(list_path)
+            # 兼容旧 json 格式
             if not list_path.exists() and legacy_path.exists() and legacy_path.stat().st_size > 0:
                 if legacy_path.stat().st_mtime >= ann_mtime:
                     ids = read_gene_id_list(legacy_path)
+                    if ids:
+                        write_gene_id_list(ids, list_path)
+                        return str(list_path), len(ids)
+            # 兼容旧 txt 格式
+            if not list_path.exists() and legacy_txt.exists() and legacy_txt.stat().st_size > 0:
+                if legacy_txt.stat().st_mtime >= ann_mtime:
+                    ids = read_gene_id_list(legacy_txt)
                     if ids:
                         write_gene_id_list(ids, list_path)
                         return str(list_path), len(ids)

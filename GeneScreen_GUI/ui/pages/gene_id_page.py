@@ -179,8 +179,10 @@ class GeneIDPage(QWidget):
         # 基因组选择
         genome_group = QGroupBox("基因组选择")
         genome_layout = QVBoxLayout(genome_group)
-        self.genome_selector = GenomePairSelector(show_manage_btn=False)
+        self.genome_selector = GenomePairSelector(show_manage_btn=False, show_ref_annotation=True,
+                                                   ref_annotation_label="参考注释版本")
         self.genome_selector.ref_changed.connect(self._on_ref_genome_changed)
+        self.genome_selector.ref_annotation_changed.connect(self._on_ref_annotation_changed)
         genome_layout.addWidget(self.genome_selector)
         layout.addWidget(genome_group)
         
@@ -215,9 +217,23 @@ class GeneIDPage(QWidget):
         
         # 批量输入
         input_layout.addSpacing(10)
+        
+        batch_header = QHBoxLayout()
         batch_label = QLabel("或批量输入 (每行一个 ID):")
         batch_label.setProperty("role", "muted")
-        input_layout.addWidget(batch_label)
+        batch_header.addWidget(batch_label)
+        batch_header.addStretch()
+        
+        # Gene list 路径显示（可点击打开）
+        self.gene_list_path_label = QLabel("")
+        self.gene_list_path_label.setProperty("role", "muted")
+        self.gene_list_path_label.setStyleSheet("color: #667eea;")
+        self.gene_list_path_label.setCursor(Qt.PointingHandCursor)
+        self.gene_list_path_label.mousePressEvent = self._open_gene_list_file
+        self.gene_list_path_label.hide()
+        batch_header.addWidget(self.gene_list_path_label)
+        
+        input_layout.addLayout(batch_header)
         
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("每行一个 ID")
@@ -335,24 +351,67 @@ class GeneIDPage(QWidget):
         layout.addStretch()
 
     def _on_ref_genome_changed(self, name: str, genome: dict):
-        gene_ids_path = genome.get("gene_ids_path") if genome else ""
-        ann_path = genome.get("annotation_path") if genome else ""
+        """参考基因组改变时，等待注释版本选择"""
         self._stop_gene_id_poll()
-        self._set_gene_id_loading_state("请选择参考基因组", disable=False)
+        self._current_ref_name = name
+        if not name:
+            self._set_gene_id_loading_state("请选择参考基因组", disable=False)
+            self._update_gene_list_path_label("")
+            return
+        # 注释版本会通过 _on_ref_annotation_changed 触发加载
+    
+    def _on_ref_annotation_changed(self, source: str, ann: dict):
+        """参考基因组注释版本改变时，加载对应的 gene id 列表"""
+        self._stop_gene_id_poll()
+        
+        if not source or not ann:
+            self._set_gene_id_loading_state("该基因组无注释文件，无法使用 Gene ID 模式", disable=True)
+            self._update_gene_list_path_label("")
+            return
+        
+        gene_ids_path = ann.get("gene_ids_path", "")
+        ann_path = ann.get("annotation_path", "")
+        
+        # 更新 gene list 路径显示
+        if gene_ids_path:
+            self._update_gene_list_path_label(gene_ids_path)
+        else:
+            # 预测路径
+            ref_name = getattr(self, '_current_ref_name', '')
+            if ref_name:
+                manager = get_genome_manager()
+                predicted_path = manager.get_gene_id_list_path(ref_name, source)
+                self._update_gene_list_path_label(predicted_path)
+        
         if gene_ids_path and os.path.exists(gene_ids_path):
             if gene_ids_path in self._gene_id_cache:
                 self._apply_gene_id_list(self._gene_id_cache[gene_ids_path])
                 return
             self._load_gene_ids_async(gene_ids_path)
             return
+        
         if not ann_path:
-            self._set_gene_id_loading_state("参考基因组缺少注释文件", disable=False)
+            self._set_gene_id_loading_state("注释文件不存在", disable=False)
             return
-        manager = get_genome_manager()
-        manager.enqueue_gene_id_list(name, ann_path)
-        self._gene_id_poll_path = manager.get_gene_id_list_path(name)
-        self._set_gene_id_loading_state("Gene ID 列表生成中，可直接输入", disable=False)
-        self._start_gene_id_poll()
+        
+        # 触发 gene list 生成
+        ref_name = getattr(self, '_current_ref_name', '')
+        if ref_name:
+            manager = get_genome_manager()
+            manager.enqueue_gene_id_list(ref_name, ann_path, source)
+            self._gene_id_poll_path = manager.get_gene_id_list_path(ref_name, source)
+            self._set_gene_id_loading_state("Gene ID 列表生成中，可直接输入", disable=False)
+            self._start_gene_id_poll()
+    
+    def _update_gene_list_path_label(self, path: str):
+        """更新 gene list 路径显示"""
+        if hasattr(self, 'gene_list_path_label'):
+            if path:
+                self.gene_list_path_label.setText(f"📄 {path}")
+                self.gene_list_path_label.setToolTip(path)
+                self.gene_list_path_label.show()
+            else:
+                self.gene_list_path_label.hide()
 
     def _set_gene_id_loading_state(self, placeholder: str, disable: bool = True):
         self.gene_id_input.setEnabled(not disable)
@@ -478,12 +537,32 @@ class GeneIDPage(QWidget):
             return
         if text.strip():
             self._clear_batch_input()
+            # 校验 gene id 是否在当前注释版本的列表中
+            self._validate_single_gene_id(text.strip())
+    
+    def _validate_single_gene_id(self, gene_id: str):
+        """校验单个 gene id 是否有效"""
+        if not gene_id:
+            self.gene_id_input.setStyleSheet("")
+            return
+        if not self._gene_id_all_ids_set:
+            # 列表未加载，不校验
+            self.gene_id_input.setStyleSheet("")
+            return
+        if gene_id in self._gene_id_all_ids_set:
+            # 有效
+            self.gene_id_input.setStyleSheet("")
+        else:
+            # 无效，标红
+            self.gene_id_input.setStyleSheet("border: 1px solid #e74c3c;")
 
     def _on_batch_gene_ids_changed(self):
         if self._syncing_inputs:
             return
         if self.batch_input.toPlainText().strip():
             self._clear_single_input()
+            # 校验批量 gene id
+            self._validate_batch_gene_ids()
 
     def _clear_batch_input(self):
         if not self.batch_input.toPlainText().strip():
@@ -493,6 +572,29 @@ class GeneIDPage(QWidget):
         self.batch_input.clear()
         self.batch_input.blockSignals(False)
         self._syncing_inputs = False
+        self.batch_input.setStyleSheet("")  # 清除校验样式
+    
+    def _validate_batch_gene_ids(self):
+        """校验批量 gene id"""
+        text = self.batch_input.toPlainText().strip()
+        if not text:
+            self.batch_input.setStyleSheet("")
+            return
+        if not self._gene_id_all_ids_set:
+            # 列表未加载，不校验
+            self.batch_input.setStyleSheet("")
+            return
+        
+        ids = [line.strip() for line in text.split('\n') if line.strip()]
+        invalid_ids = [gid for gid in ids if gid not in self._gene_id_all_ids_set]
+        
+        if invalid_ids:
+            # 有无效 ID，标黄
+            self.batch_input.setStyleSheet("border: 1px solid #f39c12;")
+            self.batch_input.setToolTip(f"以下 {len(invalid_ids)} 个 ID 未找到:\n" + "\n".join(invalid_ids[:10]))
+        else:
+            self.batch_input.setStyleSheet("")
+            self.batch_input.setToolTip("")
 
     def _clear_single_input(self):
         if not self.gene_id_input.text().strip():
@@ -627,6 +729,20 @@ class GeneIDPage(QWidget):
         if not gene_ids:
             QMessageBox.warning(self, "提示", "请输入至少一个 Gene ID")
             return
+        
+        # 批量校验：检查无效 gene id
+        if self._gene_id_all_ids_set and len(gene_ids) > 1:
+            invalid_ids = [gid for gid in gene_ids if gid not in self._gene_id_all_ids_set]
+            if invalid_ids:
+                msg = f"以下 {len(invalid_ids)} 个 Gene ID 未在当前注释版本中找到：\n"
+                msg += "\n".join(invalid_ids[:10])
+                if len(invalid_ids) > 10:
+                    msg += f"\n... 还有 {len(invalid_ids) - 10} 个"
+                msg += "\n\n是否继续？"
+                reply = QMessageBox.question(self, "确认", msg, 
+                                             QMessageBox.Yes | QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
         
         # 创建输出目录
         output_dir = self._resolve_output_dir()
@@ -789,3 +905,16 @@ class GeneIDPage(QWidget):
     @staticmethod
     def _sanitize_path_segment(text: str) -> str:
         return re.sub(r'[<>:"/\\\\|?*]', "_", text).strip()
+    
+    def _open_gene_list_file(self, event):
+        """打开 gene list 文件"""
+        path = self.gene_list_path_label.toolTip()
+        if path and os.path.exists(path):
+            import subprocess
+            import sys
+            if sys.platform == 'win32':
+                os.startfile(path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', path])
+            else:
+                subprocess.run(['xdg-open', path])
