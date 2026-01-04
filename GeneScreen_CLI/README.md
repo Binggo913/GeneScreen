@@ -113,7 +113,24 @@ python bin/GenomeManager.py add Nippon /path/to/Nipponbare.fa
 python bin/GenomeManager.py add Nippon /path/to/Nipponbare.fa -a /path/to/Nipponbare.gff3
 ```
 
-### 1.5 删除基因组
+### 1.5 添加注释版本
+
+为已有基因组添加多个注释版本：
+
+```bash
+# 添加注释版本（自动从文件名解析来源）
+python bin/GenomeManager.py add-annotation Nippon /path/to/igv.Nippon.gff3
+
+# 指定来源标识
+python bin/GenomeManager.py add-annotation Nippon /path/to/custom.gff3 -s myversion
+```
+
+> 💡 **注释版本命名约定**：
+> - 文件名格式：`{source}.{species}.{ext}`，如 `igv.ZS97.gff3`
+> - 下载的基因组自动使用来源命名：`igv.{id}.gff3` 或 `ensembl_plants.{id}.gff3`
+> - 单注释文件自动标记为 `version1`
+
+### 1.6 删除基因组
 
 ```bash
 python bin/GenomeManager.py remove IRGSP-1.0
@@ -219,6 +236,7 @@ python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 --merge-gap 5
 | `-ref` | 参考基因组 | ✓ |
 | `-qry` | 目标基因组 | 模式1/2 |
 | `-ra` | 注释文件（覆盖默认） | 可选 |
+| `-ra-source` | 注释版本（如 igv, ensembl_plants） | 可选 |
 | `-gid` | 单个 Gene ID | 模式1 |
 | `-gidl` | Gene ID 列表 | 模式1 |
 | `-u` / `--upstream` | 上游延伸长度（bp） | 模式1 可选 |
@@ -229,3 +247,27 @@ python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 --merge-gap 5
 | `--min-aln-len` | 最小比对长度 (bp)，默认 100 | 可选 |
 | `--merge-gap` | 合并间距阈值 (bp)，默认 1000 | 可选 |
 | `-o` | 输出目录 | ✓ |
+
+---
+
+## 六、多注释版本
+
+支持为同一基因组配置多个注释版本，便于使用不同来源的注释文件。
+
+### 使用指定注释版本
+
+```bash
+# 使用 igv 来源的注释
+python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -ra-source igv -o output/
+
+# 使用 ensembl_plants 来源的注释
+python bin/GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -ra-source ensembl_plants -o output/
+```
+
+### 查看基因组注释版本
+
+```bash
+python bin/GenomeManager.py info Nippon
+```
+
+> 💡 **优先级**：`-ra`（直接指定文件） > `-ra-source`（指定版本） > 默认（version1 或第一个）
