@@ -74,7 +74,6 @@ class LocationPage(QWidget):
         super().__init__(parent)
         self.history_id = None
         self._auto_output_dir = ""
-        self._syncing_inputs = False
         self._batch_mode = False
         self._history_map = {}
         self._output_dir_map = {}
@@ -111,28 +110,15 @@ class LocationPage(QWidget):
         input_group = QGroupBox("输入")
         input_layout = QVBoxLayout(input_group)
         
-        # 单个位置输入
-        loc_layout = QHBoxLayout()
-        loc_label = QLabel("位置:")
-        loc_label.setMinimumWidth(80)
-        loc_layout.addWidget(loc_label)
-        
-        self.location_input = QLineEdit()
-        self.location_input.setPlaceholderText("输入位置 (如: Chr1:1000000-1050000)")
-        self.location_input.textChanged.connect(self._on_single_location_changed)
-        loc_layout.addWidget(self.location_input, 1)
-        input_layout.addLayout(loc_layout)
+        # 位置输入说明
+        loc_label = QLabel("输入位置 (每行一个，格式: Chr1:1000000-1050000):")
+        loc_label.setProperty("role", "muted")
+        input_layout.addWidget(loc_label)
         
         # 批量输入
-        input_layout.addSpacing(10)
-        batch_label = QLabel("或批量输入 (每行一个位置，格式: Chr1:100-200):")
-        batch_label.setProperty("role", "muted")
-        input_layout.addWidget(batch_label)
-        
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("Chr1:1000000-1050000\nChr2:2000000-2100000\n...")
-        self.batch_input.setMaximumHeight(100)
-        self.batch_input.textChanged.connect(self._on_batch_locations_changed)
+        self.batch_input.setMinimumHeight(100)
         input_layout.addWidget(self.batch_input)
         
         layout.addWidget(input_group)
@@ -243,36 +229,6 @@ class LocationPage(QWidget):
         current = self.output_dir.text().strip()
         if not current or current == self._auto_output_dir:
             self._set_default_output_dir()
-
-    def _on_single_location_changed(self, text: str):
-        if self._syncing_inputs:
-            return
-        if text.strip():
-            self._clear_batch_input()
-
-    def _on_batch_locations_changed(self):
-        if self._syncing_inputs:
-            return
-        if self.batch_input.toPlainText().strip():
-            self._clear_single_input()
-
-    def _clear_batch_input(self):
-        if not self.batch_input.toPlainText().strip():
-            return
-        self._syncing_inputs = True
-        self.batch_input.blockSignals(True)
-        self.batch_input.clear()
-        self.batch_input.blockSignals(False)
-        self._syncing_inputs = False
-
-    def _clear_single_input(self):
-        if not self.location_input.text().strip():
-            return
-        self._syncing_inputs = True
-        self.location_input.blockSignals(True)
-        self.location_input.clear()
-        self.location_input.blockSignals(False)
-        self._syncing_inputs = False
     
     def _parse_location(self, text: str) -> dict:
         """解析位置字符串"""
@@ -312,12 +268,6 @@ class LocationPage(QWidget):
         
         # 获取位置
         locations = []
-        single_loc = self.location_input.text().strip()
-        if single_loc:
-            loc = self._parse_location(single_loc)
-            if loc:
-                locations.append(loc)
-        
         batch_text = self.batch_input.toPlainText().strip()
         if batch_text:
             for line in batch_text.split('\n'):
