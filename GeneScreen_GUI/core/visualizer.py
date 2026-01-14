@@ -1231,16 +1231,14 @@ class BaseVisualizer:
             ('CDS', '#7A7A7A', 'rect', 'cds'),
         ]
         
-        # 图例框尺寸（增加宽度以容纳勾选框）
+        # 图例框尺寸
         item_height = 20
         padding_x = 10
         padding_y = 8
-        checkbox_size = 12
-        checkbox_margin = 5
         icon_width = 12
         text_offset = 20
         max_text_width = 60
-        box_width = padding_x * 2 + checkbox_size + checkbox_margin + icon_width + text_offset + max_text_width
+        box_width = padding_x * 2 + icon_width + text_offset + max_text_width
         box_height = padding_y * 2 + len(items) * item_height
         
         # 图例框位置（右上角，距离右边 30px，与轨道保持距离）
@@ -1255,25 +1253,16 @@ class BaseVisualizer:
                   fill="white" stroke="#ddd" stroke-width="1" rx="4" opacity="0.95"/>
         ''')
         
-        # 绘制图例项（每项是一个可点击的组，带勾选框）
+        # 绘制图例项（每项是一个可点击的组）
         current_y = box_y + padding_y + 10
         for label, color, shape, data_type in items:
-            checkbox_x = box_x + padding_x
-            icon_x = checkbox_x + checkbox_size + checkbox_margin
+            icon_x = box_x + padding_x
             
             # 包装成可点击的组
             parts.append(f'''
                 <g class="legend-item" data-type="{data_type}" style="cursor: pointer;">
                     <rect x="{box_x + 2}" y="{current_y - 9}" width="{box_width - 4}" height="{item_height - 2}" 
                           fill="transparent" class="legend-hitarea"/>
-            ''')
-            
-            # 勾选框（默认勾选状态）
-            parts.append(f'''
-                    <rect class="legend-checkbox" x="{checkbox_x}" y="{current_y - 6}" width="{checkbox_size}" height="{checkbox_size}" 
-                          fill="white" stroke="#999" stroke-width="1" rx="2"/>
-                    <polyline class="legend-checkmark" points="{checkbox_x + 2},{current_y} {checkbox_x + 5},{current_y + 3} {checkbox_x + 10},{current_y - 4}" 
-                              fill="none" stroke="#2563eb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
             ''')
             
             if shape == 'line':
