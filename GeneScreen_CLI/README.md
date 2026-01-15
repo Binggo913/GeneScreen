@@ -50,8 +50,13 @@ GeneScreen_2.0/
 #### 2. 创建环境
 
 ```bash
+# micromamba（推荐）
 micromamba create -f environment.yml
 micromamba activate genescreen
+
+# conda（传统）
+conda env create -f environment.yml
+conda activate genescreen
 ```
 
 ---
@@ -72,8 +77,13 @@ https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/ncbi-blast-2.17.0+-
 Invoke-Expression ((Invoke-WebRequest -Uri https://micro.mamba.pm/install.ps1).Content)
 
 # 创建环境
+# micromamba（推荐）
 micromamba create -f environment_windows.yml
 micromamba activate genescreen
+
+# conda（传统）
+conda env create -f environment_windows.yml
+conda activate genescreen
 ```
 
 

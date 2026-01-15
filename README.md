@@ -35,13 +35,19 @@
 ### CLI 版本
 
 ```bash
+
 # 1. 克隆仓库
 git clone https://github.com/Binggo913/GeneScreen.git
 cd GeneScreen/GeneScreen_CLI
 
 # 2. 创建环境
-micromamba create -f environment.yml  # Linux/macOS
+# micromamba（推荐）
+micromamba create -f environment.yml
 micromamba activate genescreen
+
+# conda（传统）
+conda env create -f environment.yml
+conda activate genescreen
 
 # 3. 下载基因组
 python bin/GenomeManager.py download IRGSP-1.0
@@ -72,6 +78,15 @@ GeneScreen/
 ```
 
 ## 依赖
+
+### 环境管理器
+
+| 工具 | 说明 |
+|------|------|
+| [micromamba](https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html) | 轻量级环境管理（推荐） |
+| [conda](https://docs.conda.io/en/latest/miniconda.html) | 传统环境管理 |
+
+### 核心依赖
 
 | 工具 | 用途 |
 |------|------|

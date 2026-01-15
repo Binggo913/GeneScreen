@@ -69,11 +69,7 @@ class GenomeManager:
 
         返回: (genome_path, annotation_path) 或 (None, None)
         """
-        # 1. 检查是否是本地路径
-        if os.path.exists(name_or_path):
-            return name_or_path, None
-
-        # 2. 从数据库查找
+        # 1. 优先从数据库查找（避免当前目录同名文件/目录干扰）
         genome = self.db.get_genome(name_or_path)
         if genome:
             # 获取注释版本
@@ -87,6 +83,10 @@ class GenomeManager:
             
             annotation_path = ann["annotation_path"] if ann else genome.get("annotation_path")
             return genome["fasta_path"], annotation_path
+
+        # 2. 数据库没找到，检查是否是本地文件路径
+        if os.path.exists(name_or_path):
+            return name_or_path, None
 
         print(f"[ERROR] 未找到基因组: {name_or_path}")
         print("  使用 'python GenomeManager.py search <keyword>' 搜索可用基因组")
