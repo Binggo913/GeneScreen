@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-GeneScreen 3.0 - 序列分析模块
+GeneScreen 1.0 - 序列分析模块
 
-整合自 GeneScreen 2.0:
+整合自 CLI 版本:
 - SequenceExtractor: 使用 pyfaidx 从参考基因组提取序列
 - BlastAligner: 使用 BLAST+ 进行序列比对和变异检测
 
-改动（相比 2.0）：
+改动（相比 CLI 版本）：
 - 移除 CLI 相关代码
 - 添加类型注解
 - 使用 Database 记录分析历史

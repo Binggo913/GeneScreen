@@ -1,4 +1,4 @@
-# GeneScreen 3.0 开发环境 (Linux/WSL)
+# GeneScreen 1.0 开发环境 (Linux/WSL)
 # 安装: micromamba create -f environment.yml
 # 激活: micromamba activate genescreen
 

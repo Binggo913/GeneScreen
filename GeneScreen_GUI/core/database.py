@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - SQLite 数据库管理模块
+GeneScreen 1.0 - SQLite 数据库管理模块
 
 管理基因组库和分析历史记录
 """

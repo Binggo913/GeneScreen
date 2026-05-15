@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - Location 模式页面
+GeneScreen 1.0 - Location 模式页面
 
 输入染色体坐标，提取指定区域并与目标基因组比对
 """

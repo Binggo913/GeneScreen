@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GeneScreen 2.0 可视化与报告模块
+GeneScreen 1.0 可视化与报告模块
 
 为三种输入模式提供独立的可视化处理逻辑，生成 HTML 报告
 支持 LINKVIEW 可视化工具生成比对图
@@ -4210,7 +4210,7 @@ class BaseVisualizer:
 
     def _get_html_footer(self):
         """生成 HTML 尾部"""
-        return """
+        return r"""
 <div id="copyToast" class="copy-toast">已复制到剪贴板</div>
 </div>
 <script>

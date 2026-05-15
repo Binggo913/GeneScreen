@@ -1,4 +1,4 @@
-# GeneScreen 3.0 Utils
+# GeneScreen 1.0 Utils
 import subprocess
 import sys
 

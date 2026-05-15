@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - 报告生成线程
+GeneScreen 1.0 - 报告生成线程
 """
 from PySide6.QtCore import QThread, Signal
 

@@ -26,9 +26,10 @@
 ### GUI 版本（推荐新手使用）
 
 1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载安装包
-   - Windows: `GeneScreen_Setup_x.x.x.exe`
-   - macOS (Apple Silicon): `GeneScreen_macOS_arm64.dmg`
-   - macOS (Intel): `GeneScreen_macOS_x64.dmg`
+   - Windows x64: `GeneScreen_1.0_windows_x64_<timestamp>.zip`
+   - Windows ARM64: `GeneScreen_1.0_windows_arm64_<timestamp>.zip`
+   - macOS Intel: `GeneScreen_1.0_macos_x64_<timestamp>.dmg`
+   - macOS Apple Silicon: `GeneScreen_1.0_macos_arm64_<timestamp>.dmg`
 2. 安装 [BLAST+](https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/)
 3. 运行 GeneScreen，开始分析
 

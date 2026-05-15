@@ -1,4 +1,4 @@
-# GeneScreen 3.0 Core Module
+# GeneScreen 1.0 Core Module
 
 from .database import Database, get_database
 from .genome_manager import GenomeManager, get_genome_manager

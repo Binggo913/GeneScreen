@@ -1,4 +1,4 @@
-# GeneScreen 3.0 UI Widgets
+# GeneScreen 1.0 UI Widgets
 
 from .genome_selector import GenomeSelector, GenomePairSelector
 from .genome_manager_dialog import GenomeManagerDialog

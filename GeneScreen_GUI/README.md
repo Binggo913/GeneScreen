@@ -1,4 +1,4 @@
-# GeneScreen 1.0.0
+# GeneScreen 1.0
 
 [![Release](https://img.shields.io/github/v/release/Binggo913/GeneScreen)](https://github.com/Binggo913/GeneScreen/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -21,13 +21,15 @@
 
 ### Windows
 
-1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载 `GeneScreen_Setup_x.x.x.exe`
-2. 运行安装程序，按提示完成安装
+1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载对应架构的 `GeneScreen_1.0_windows_<arch>_<timestamp>.zip`
+2. 解压后运行 `GeneScreen.exe`
 3. 安装 BLAST+（见下方说明）
 
 ### macOS
 
-*Coming soon*
+1. 从 [Releases](https://github.com/Binggo913/GeneScreen/releases) 下载对应架构的 `GeneScreen_1.0_macos_<arch>_<timestamp>.dmg`
+2. 打开 DMG 后将 GeneScreen 拖到 Applications
+3. 安装 BLAST+（见下方说明）
 
 ## 安装 BLAST+
 
@@ -116,14 +118,8 @@ python main.py
 ### 打包
 
 ```bash
-# Windows: 打包可执行文件
+# 本地仅执行 Nuitka 构建；正式四架构产物由 GitHub Actions 生成
 python build.py
-
-# Windows: 打包并生成安装包（需要 Inno Setup）
-python build.py --setup
-
-# macOS: 打包 .app
-python build.py --mac
 ```
 
 ## 系统要求

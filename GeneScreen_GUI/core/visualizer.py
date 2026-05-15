@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GeneScreen 2.0 可视化与报告模块
+GeneScreen 1.0 可视化与报告模块
 
 为三种输入模式提供独立的可视化处理逻辑，生成 HTML 报告
 支持 LINKVIEW 可视化工具生成比对图
@@ -4334,7 +4334,7 @@ class BaseVisualizer:
 
     def _get_html_footer(self):
         """生成 HTML 尾部"""
-        return """
+        return r"""
 <div id="copyToast" class="copy-toast">已复制到剪贴板</div>
 </div>
 <script>
@@ -4833,7 +4833,7 @@ class SequenceVisualizer(BaseVisualizer):
 
 
 # ============================================================
-# 兼容层 - 保持与 3.0 旧接口一致
+# 兼容层 - 保持与历史接口一致
 # ============================================================
 
 class ReportGenerator:
@@ -4841,7 +4841,7 @@ class ReportGenerator:
     兼容旧接口的报告生成器
     
     包装 GeneIDVisualizer/LocationVisualizer/SequenceVisualizer，
-    提供与 3.0 旧版 visualizer.py 一致的接口
+    提供与旧版 visualizer.py 一致的接口
     """
     
     def __init__(self, output_dir: str):
@@ -4911,7 +4911,7 @@ def generate_report(result, output_dir, mode="gene_id", ref_name="", qry_name=""
     """
     生成分析报告的便捷函数
     
-    兼容 3.0 旧版 visualizer.py 的接口
+    兼容旧版 visualizer.py 的接口
     
     Args:
         result: 分析结果字典

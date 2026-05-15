@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GeneScreen 3.0 - 基因组库管理模块
+GeneScreen 1.0 - 基因组库管理模块
 
 支持多种来源：
 1. 用户自定义基因组（本地路径）
@@ -8,7 +8,7 @@ GeneScreen 3.0 - 基因组库管理模块
 3. Ensembl Plants 植物基因组
 4. 已下载基因组的管理（查看/删除）
 
-改动（相比 2.0）：
+改动（相比 CLI 版本）：
 - 使用 SQLite 数据库替代 JSON 配置文件
 - 通过 core/database.py 的 Database 类管理数据
 """

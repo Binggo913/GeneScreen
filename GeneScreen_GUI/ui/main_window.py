@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - 主窗口
+GeneScreen 1.0 - 主窗口
 
 PySide6 实现的桌面 GUI 主窗口
 """
@@ -109,7 +109,7 @@ class WindowRoot(QWidget):
 
 
 class MainWindow(QMainWindow):
-    """GeneScreen 3.0 主窗口"""
+    """GeneScreen 1.0 主窗口"""
 
     def __init__(self):
         super().__init__()

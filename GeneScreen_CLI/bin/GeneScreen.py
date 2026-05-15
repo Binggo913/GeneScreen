@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GeneScreen 2.0 - 基因组比对与变异分析工具
+GeneScreen 1.0 - 基因组比对与变异分析工具
 
 使用 BLAST+ + pyfaidx + ripgrep，实现跨平台兼容 (Windows/macOS/Linux)
 
@@ -916,7 +916,7 @@ class SequenceProcessor:
 # ======================= 主程序 =======================
 def main():
     parser = argparse.ArgumentParser(
-        description="GeneScreen 2.0 - 基因组比对与变异分析工具 (跨平台版)",
+        description="GeneScreen 1.0 - 基因组比对与变异分析工具 (跨平台版)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 使用示例:

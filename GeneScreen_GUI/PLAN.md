@@ -1,4 +1,4 @@
-# GeneScreen 3.0 实现规划
+# GeneScreen 1.0 实现规划
 
 ## 目标
 
@@ -95,7 +95,7 @@ CREATE INDEX idx_history_created ON analysis_history(created_at);
 ## 目录结构
 
 ```
-GeneScreen_3.0/
+GeneScreen_1.0/
 ├── main.py                   # 程序入口
 ├── core/                     # 核心业务逻辑
 │   ├── __init__.py
@@ -140,7 +140,7 @@ GeneScreen_3.0/
 ### 打包后分发结构
 
 ```
-GeneScreen_3.0_Windows/
+GeneScreen_1.0_Windows/
 ├── GeneScreen.exe            # 主程序
 ├── README.txt                # 使用说明
 └── _internal/                # 依赖文件
@@ -154,7 +154,7 @@ GeneScreen_3.0_Windows/
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  GeneScreen 3.0                                    [─] [□] [×]  │
+│  GeneScreen 1.0                                    [─] [□] [×]  │
 ├─────────────────────────────────────────────────────────────────┤
 │  ┌──────────┐  ┌─────────────────────────────────────────────┐  │
 │  │          │  │                                             │  │
@@ -320,7 +320,7 @@ from PySide6.QtCore import Qt
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("GeneScreen 3.0")
+        self.setWindowTitle("GeneScreen 1.0")
         self.setMinimumSize(1200, 800)
 
         # 中央部件
@@ -520,7 +520,7 @@ class GeneIDPage(QWidget):
 ## main.py 入口设计
 
 ```python
-"""GeneScreen 3.0 主程序入口"""
+"""GeneScreen 1.0 主程序入口"""
 import sys
 from PySide6.QtWidgets import QApplication, QMessageBox
 from PySide6.QtGui import QIcon
@@ -532,7 +532,7 @@ from ui.main_window import MainWindow
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName("GeneScreen")
-    app.setApplicationVersion("3.0")
+    app.setApplicationVersion("1.0")
 
     # 检查 BLAST+
     if not check_blast():
@@ -678,7 +678,7 @@ pyinstaller GeneScreen.spec
 ### 前置条件
 
 1. 安装 BLAST+：https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
-2. 下载 GeneScreen_3.0_Windows.zip 并解压
+2. 下载 GeneScreen_1.0_Windows.zip 并解压
 
 ### 使用步骤
 

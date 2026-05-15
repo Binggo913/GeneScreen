@@ -1,132 +1,123 @@
-name: Build Release
+name: Build GUI Packages
 
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:  # 手动触发
+  workflow_dispatch:
+
+env:
+  APP_NAME: GeneScreen
+  APP_VERSION: "1.0"
+  PYTHON_VERSION: "3.11"
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
+  metadata:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      timestamp: ${{ steps.meta.outputs.timestamp }}
+    steps:
+      - name: Build metadata
+        id: meta
+        run: |
+          echo "version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +'%Y%m%d-%H%M%S')" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            arch: x64
+            runner: windows-2025
+            python-arch: x64
+          - platform: windows
+            arch: arm64
+            runner: windows-11-arm
+            python-arch: arm64
+          - platform: macos
+            arch: x64
+            runner: macos-15-intel
+            python-arch: x64
+          - platform: macos
+            arch: arm64
+            runner: macos-15
+            python-arch: arm64
+
+    runs-on: ${{ matrix.runner }}
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
+          python-version: ${{ env.PYTHON_VERSION }}
+          architecture: ${{ matrix.python-arch }}
+
+      - name: Install Python dependencies
+        working-directory: GeneScreen_GUI
         run: |
-          pip install nuitka pyside6 pyfaidx biopython requests
-      
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install macOS packaging dependency
+        if: matrix.platform == 'macos'
+        run: brew install create-dmg
+
       - name: Build with Nuitka
         working-directory: GeneScreen_GUI
         run: python build.py
-      
-      - name: Build installer
-        working-directory: GeneScreen_GUI
-        run: |
-          choco install innosetup -y
-          python build.py --setup
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: GeneScreen-Windows-x64
-          path: GeneScreen_GUI/dist/GeneScreen_Setup_*.exe
 
-  build-macos-arm:
-    runs-on: macos-14  # Apple Silicon
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          pip install nuitka pyside6 pyfaidx biopython requests
-          brew install create-dmg
-      
-      - name: Build with Nuitka
+      - name: Package Windows build
+        if: matrix.platform == 'windows'
+        shell: pwsh
         working-directory: GeneScreen_GUI
         run: |
-          python -m nuitka --standalone --enable-plugin=pyside6 \
-            --output-dir=dist \
-            --include-data-dir=ui/resources=ui/resources \
-            --include-data-files=core/LINKVIEW.py=core/LINKVIEW.py \
-            --include-data-files=core/interval.py=core/interval.py \
-            --macos-create-app-bundle \
-            --macos-app-name=GeneScreen \
-            --assume-yes-for-downloads \
-            main.py
-      
-      - name: Create DMG
+          $PackageName = "${{ env.APP_NAME }}_${{ needs.metadata.outputs.version }}_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.metadata.outputs.timestamp }}"
+          $PackageDir = Join-Path "dist/packages" $PackageName
+          $SourceDir = Get-ChildItem -Path "dist" -Directory -Filter "*.dist" | Select-Object -First 1
+          if (-not $SourceDir) {
+            throw "Nuitka .dist directory not found"
+          }
+          New-Item -ItemType Directory -Force -Path $PackageDir | Out-Null
+          Copy-Item -Path (Join-Path $SourceDir.FullName "*") -Destination $PackageDir -Recurse -Force
+          Compress-Archive -Path $PackageDir -DestinationPath "dist/packages/$PackageName.zip" -Force
+
+      - name: Package macOS build
+        if: matrix.platform == 'macos'
+        shell: bash
         working-directory: GeneScreen_GUI
         run: |
+          package_name="${APP_NAME}_${{ needs.metadata.outputs.version }}_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.metadata.outputs.timestamp }}"
+          app_path="$(find dist -maxdepth 1 -type d -name '*.app' | head -n 1)"
+          if [ -z "$app_path" ]; then
+            echo "Nuitka .app bundle not found" >&2
+            exit 1
+          fi
+          mkdir -p dist/packages
+          stage_dir="dist/packages/${package_name}-stage"
+          rm -rf "$stage_dir"
+          mkdir -p "$stage_dir"
+          cp -R "$app_path" "$stage_dir/${APP_NAME}.app"
           create-dmg \
-            --volname "GeneScreen" \
+            --volname "${APP_NAME}" \
             --window-size 600 400 \
             --icon-size 100 \
             --app-drop-link 450 200 \
-            --icon "GeneScreen.app" 150 200 \
-            "dist/GeneScreen_macOS_arm64.dmg" \
-            "dist/main.app"
-      
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: GeneScreen-macOS-arm64
-          path: GeneScreen_GUI/dist/*.dmg
+            --icon "${APP_NAME}.app" 150 200 \
+            "dist/packages/${package_name}.dmg" \
+            "$stage_dir"
 
-  build-macos-intel:
-    runs-on: macos-15-large  # Intel
-    steps:
-      - uses: actions/checkout@v4
-      
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-      
-      - name: Install dependencies
-        run: |
-          pip install nuitka pyside6 pyfaidx biopython requests
-          brew install create-dmg
-      
-      - name: Build with Nuitka
-        working-directory: GeneScreen_GUI
-        run: |
-          python -m nuitka --standalone --enable-plugin=pyside6 \
-            --output-dir=dist \
-            --include-data-dir=ui/resources=ui/resources \
-            --include-data-files=core/LINKVIEW.py=core/LINKVIEW.py \
-            --include-data-files=core/interval.py=core/interval.py \
-            --macos-create-app-bundle \
-            --macos-app-name=GeneScreen \
-            --assume-yes-for-downloads \
-            main.py
-      
-      - name: Create DMG
-        working-directory: GeneScreen_GUI
-        run: |
-          create-dmg \
-            --volname "GeneScreen" \
-            --window-size 600 400 \
-            --icon-size 100 \
-            --app-drop-link 450 200 \
-            --icon "GeneScreen.app" 150 200 \
-            "dist/GeneScreen_macOS_x64.dmg" \
-            "dist/main.app"
-      
-      - name: Upload artifact
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: GeneScreen-macOS-x64
-          path: GeneScreen_GUI/dist/*.dmg
+          name: ${{ env.APP_NAME }}-${{ needs.metadata.outputs.version }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ needs.metadata.outputs.timestamp }}
+          path: GeneScreen_GUI/dist/packages/${{ env.APP_NAME }}_${{ needs.metadata.outputs.version }}_${{ matrix.platform }}_${{ matrix.arch }}_${{ needs.metadata.outputs.timestamp }}.*
 
   release:
-    needs: [build-windows, build-macos-arm, build-macos-intel]
+    needs: [metadata, build]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
@@ -136,13 +127,10 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            artifacts/GeneScreen-Windows-x64/*
-            artifacts/GeneScreen-macOS-arm64/*
-            artifacts/GeneScreen-macOS-x64/*
+          files: artifacts/**/*
           draft: false
           prerelease: false

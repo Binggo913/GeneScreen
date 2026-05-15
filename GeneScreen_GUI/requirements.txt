@@ -1,4 +1,4 @@
-# GeneScreen 3.0 Python 依赖
+# GeneScreen 1.0 Python 依赖
 #
 # ============================================================
 # 开发环境安装（推荐）
@@ -24,6 +24,7 @@ PySide6>=6.5
 # 序列处理
 pyfaidx
 biopython
+cairosvg
 
 # 打包工具
 nuitka

@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - BLAST+ 检测工具
+GeneScreen 1.0 - BLAST+ 检测工具
 
 检测系统是否安装了 BLAST+ 并获取版本信息
 """

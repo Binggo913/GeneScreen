@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - 设置页面
+GeneScreen 1.0 - 设置页面
 """
 from pathlib import Path
 

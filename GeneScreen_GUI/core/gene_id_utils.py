@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - Gene ID utilities
+GeneScreen 1.0 - Gene ID utilities
 
 Extract gene IDs from annotation files or read prebuilt ID lists.
 """

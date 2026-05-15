@@ -1,4 +1,4 @@
-# GeneScreen 2.0
+# GeneScreen 1.0
 
 基因组比对与变异分析工具，跨平台版本（Windows/macOS/Linux）。
 
@@ -7,7 +7,7 @@
 ## 目录结构
 
 ```
-GeneScreen_2.0/
+GeneScreen_1.0/
 ├── bin/                        # 脚本目录
 │   ├── GeneScreen.py           # 主程序
 │   ├── GeneScreenVisualizer.py # 可视化模块

@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - Sequence 模式页面
+GeneScreen 1.0 - Sequence 模式页面
 
 输入序列，与参考基因组进行比对
 """

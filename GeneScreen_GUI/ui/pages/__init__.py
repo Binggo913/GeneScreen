@@ -1,4 +1,4 @@
-# GeneScreen 3.0 UI Pages
+# GeneScreen 1.0 UI Pages
 
 from .gene_id_page import GeneIDPage
 from .location_page import LocationPage

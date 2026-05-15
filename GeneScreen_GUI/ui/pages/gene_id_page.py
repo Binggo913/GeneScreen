@@ -1,5 +1,5 @@
 """
-GeneScreen 3.0 - Gene ID 模式页面
+GeneScreen 1.0 - Gene ID 模式页面
 
 输入基因 ID，从参考基因组提取序列并与目标基因组比对
 """
