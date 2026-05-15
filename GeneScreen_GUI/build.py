@@ -6,9 +6,9 @@ Nuitka 打包脚本 - GeneScreen 1.0
 用法:
   python build.py
 """
+import platform
 import subprocess
 import sys
-import platform
 from pathlib import Path
 
 
@@ -55,11 +55,11 @@ def build_nuitka():
 
     cmd.append("main.py")
 
-    print(f"平台: {system}")
-    print("开始 Nuitka 编译...")
+    print(f"Platform: {system}")
+    print("Starting Nuitka build...")
     print(" ".join(cmd))
     subprocess.run(cmd, check=True)
-    print("\nNuitka 编译完成！")
+    print("\nNuitka build completed.")
 
 
 def main():
