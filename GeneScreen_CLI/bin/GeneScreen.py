@@ -15,6 +15,7 @@ import subprocess
 import argparse
 import re
 from dataclasses import dataclass
+from itertools import combinations, product
 from pathlib import Path
 
 from pyfaidx import Fasta
@@ -22,6 +23,7 @@ from Bio.Blast import NCBIXML
 
 from GeneScreenVisualizer import GeneIDVisualizer, LocationVisualizer, SequenceVisualizer
 from GenomeManager import GenomeManager
+from multi_query_result import parse_coords_candidates
 
 
 # 全局基因组管理器
@@ -122,6 +124,79 @@ def normalize_query_entries(query_genome=None, qry_name="", qry_gff=None, query_
     elif query_genome:
         normalized.append({"name": qry_name or "query", "fasta": query_genome, "gff": qry_gff})
     return [entry for entry in normalized if entry.get("fasta")]
+
+
+def extract_candidate_fasta(query_entry, candidate, output_dir):
+    chrom = candidate.get("query_chr")
+    start = int(candidate.get("query_start") or 0)
+    end = int(candidate.get("query_end") or 0)
+    fasta_path = query_entry.get("fasta")
+    if not chrom or not fasta_path or start <= 0 or end <= 0:
+        return None
+    safe_query = sanitize_path_segment(query_entry.get("name") or "query") or "query"
+    candidate_id = sanitize_path_segment(candidate.get("candidate_id") or "candidate") or "candidate"
+    out_dir = os.path.join(output_dir, "queries", safe_query, "candidates")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, f"{candidate_id}.fasta")
+    left, right = min(start, end), max(start, end)
+    try:
+        fasta = Fasta(fasta_path)
+        seq = fasta[chrom][left - 1:right].seq
+        fasta.close()
+    except Exception as exc:
+        print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{left}-{right}: {exc}")
+        return None
+    with open(out_path, "w", encoding="utf-8") as handle:
+        handle.write(f">{safe_query}_{candidate_id}|{chrom}:{left}-{right}|strand={candidate.get('strand', '+')}\n")
+        handle.write(f"{seq}\n")
+    return out_path
+
+
+def precompute_pairwise(query_results, query_entries, aligner, output_dir, identity, candidate_limit=3, pairwise_all=False):
+    bundles = []
+    for index, query_result in enumerate(query_results):
+        if index >= len(query_entries):
+            continue
+        entry = query_entries[index]
+        candidates = parse_coords_candidates(query_result.get("coords"))
+        if not pairwise_all:
+            candidates = candidates[:candidate_limit]
+        prepared = []
+        for candidate in candidates:
+            fasta = extract_candidate_fasta(entry, candidate, output_dir)
+            if fasta:
+                prepared.append({"candidate": candidate, "fasta": fasta})
+        bundles.append({"entry": entry, "safe": sanitize_path_segment(entry.get("name") or "query") or "query", "candidates": prepared})
+
+    pairwise_results = []
+    original_output_dir = aligner.output_dir
+    for left, right in combinations(bundles, 2):
+        if not left["candidates"] or not right["candidates"]:
+            continue
+        pair_safe = f"{left['safe']}__{right['safe']}"
+        pair_dir = os.path.join(output_dir, "pairwise", pair_safe)
+        os.makedirs(pair_dir, exist_ok=True)
+        aligner.output_dir = pair_dir
+        for left_candidate, right_candidate in product(left["candidates"], right["candidates"]):
+            left_id = sanitize_path_segment(left_candidate["candidate"].get("candidate_id") or "candidate")
+            right_id = sanitize_path_segment(right_candidate["candidate"].get("candidate_id") or "candidate")
+            prefix = f"{left['safe']}_{left_id}__{right['safe']}_{right_id}"
+            aligned = aligner.align(right_candidate["fasta"], left_candidate["fasta"], prefix, identity)
+            if not aligned:
+                continue
+            aligned.update({
+                "pair_id": pair_safe,
+                "left_query": left["entry"].get("name"),
+                "right_query": right["entry"].get("name"),
+                "left_candidate_id": left_candidate["candidate"].get("candidate_id"),
+                "right_candidate_id": right_candidate["candidate"].get("candidate_id"),
+                "left_candidate_fasta": left_candidate["fasta"],
+                "right_candidate_fasta": right_candidate["fasta"],
+                "pair_dir": pair_dir,
+            })
+            pairwise_results.append(aligned)
+    aligner.output_dir = original_output_dir
+    return pairwise_results
 
 
 # ======================= 序列提取模块 =======================
@@ -751,7 +826,7 @@ class BlastAligner:
 class GeneIDProcessor:
     """Gene ID 模式处理器"""
 
-    def __init__(self, ref_genome, ref_annotation, query_genome, output_dir, ref_name="", qry_name="", identity=90, qry_gff=None, upstream=0, downstream=0, min_aln_len=100, merge_gap=1000, query_entries=None):
+    def __init__(self, ref_genome, ref_annotation, query_genome, output_dir, ref_name="", qry_name="", identity=90, qry_gff=None, upstream=0, downstream=0, min_aln_len=100, merge_gap=1000, query_entries=None, candidate_limit=3, pairwise_all=False):
         self.extractor = SequenceExtractor(ref_genome, ref_annotation, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.query_genome = query_genome
@@ -764,6 +839,8 @@ class GeneIDProcessor:
         self.downstream = downstream
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.candidate_limit = candidate_limit
+        self.pairwise_all = pairwise_all
         # 保存基因组文件路径
         self.genome_files = {
             'ref_fasta': ref_genome,
@@ -797,6 +874,12 @@ class GeneIDProcessor:
         result = dict(query_results[0])
         result["query_results"] = query_results
         result["queries"] = self.query_entries
+        result["pairwise_results"] = precompute_pairwise(
+            query_results, self.query_entries, self.aligner, self.output_dir,
+            self.identity, self.candidate_limit, self.pairwise_all
+        )
+        result["candidate_limit"] = self.candidate_limit
+        result["pairwise_all"] = self.pairwise_all
         return result
 
     def process(self, gene_id):
@@ -847,7 +930,7 @@ class GeneIDProcessor:
 class LocationProcessor:
     """Location 模式处理器"""
 
-    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None):
+    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None, candidate_limit=3, pairwise_all=False):
         self.extractor = SequenceExtractor(ref_genome, None, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
@@ -859,6 +942,8 @@ class LocationProcessor:
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.candidate_limit = candidate_limit
+        self.pairwise_all = pairwise_all
         # 保存基因组文件路径
         self.genome_files = {
             'ref_fasta': ref_genome,
@@ -892,6 +977,12 @@ class LocationProcessor:
         result = dict(query_results[0])
         result["query_results"] = query_results
         result["queries"] = self.query_entries
+        result["pairwise_results"] = precompute_pairwise(
+            query_results, self.query_entries, self.aligner, self.output_dir,
+            self.identity, self.candidate_limit, self.pairwise_all
+        )
+        result["candidate_limit"] = self.candidate_limit
+        result["pairwise_all"] = self.pairwise_all
         return result
 
     def process(self, chrom, start, end, name=None):
@@ -935,7 +1026,7 @@ class LocationProcessor:
 class SequenceProcessor:
     """Sequence 模式处理器"""
 
-    def __init__(self, ref_genome, output_dir, ref_name="", identity=90, ref_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None):
+    def __init__(self, ref_genome, output_dir, ref_name="", identity=90, ref_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None, candidate_limit=3, pairwise_all=False):
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
         self.query_entries = normalize_query_entries(ref_genome, ref_name, ref_gff, query_entries)
@@ -944,6 +1035,8 @@ class SequenceProcessor:
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.candidate_limit = candidate_limit
+        self.pairwise_all = pairwise_all
         # 保存基因组文件路径
         self.genome_files = {
             'ref_fasta': ref_genome,
@@ -975,6 +1068,12 @@ class SequenceProcessor:
         result = dict(query_results[0])
         result["query_results"] = query_results
         result["queries"] = self.query_entries
+        result["pairwise_results"] = precompute_pairwise(
+            query_results, self.query_entries, self.aligner, self.output_dir,
+            self.identity, self.candidate_limit, self.pairwise_all
+        )
+        result["candidate_limit"] = self.candidate_limit
+        result["pairwise_all"] = self.pairwise_all
         return result
 
     def process(self, seq_file):
@@ -1163,6 +1262,17 @@ def main():
         default=1000,
         help="合并间距阈值 bp，间距小于此值的比对块合并为一组 (默认: 1000)",
     )
+    parser.add_argument(
+        "--candidate-limit",
+        type=int,
+        default=3,
+        help="每个 query 用于 query-query 预计算的候选数量 (默认: 3)",
+    )
+    parser.add_argument(
+        "--pairwise-all",
+        action="store_true",
+        help="query-query 预计算使用所有通过阈值的候选，覆盖 --candidate-limit",
+    )
 
     # Gene ID 模式专用参数：上下游延伸
     parser.add_argument(
@@ -1191,6 +1301,8 @@ def main():
         raise ValueError(f"-u/--upstream 参数不能为负数，当前值: {args.upstream}")
     if args.downstream < 0:
         raise ValueError(f"-d/--downstream 参数不能为负数，当前值: {args.downstream}")
+    if args.candidate_limit < 1:
+        raise ValueError(f"--candidate-limit 参数必须大于 0，当前值: {args.candidate_limit}")
 
     # 获取基因组路径（支持注释版本选择）
     ra_source = getattr(args, 'ra_source', None)
@@ -1222,7 +1334,9 @@ def main():
             sequence_target.fasta, args.output, sequence_target.name, args.identity,
             ref_gff=sequence_target.annotation,
             min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
-            query_entries=resolved_queries
+            query_entries=resolved_queries,
+            candidate_limit=args.candidate_limit,
+            pairwise_all=args.pairwise_all
         )
         processor.process(args.seq)
 
@@ -1245,7 +1359,9 @@ def main():
             ref_genome, ref_annotation, qry_genome, args.output, ref_name, qry_name, args.identity,
             qry_gff=qry_annotation, upstream=args.upstream, downstream=args.downstream,
             min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
-            query_entries=resolved_queries
+            query_entries=resolved_queries,
+            candidate_limit=args.candidate_limit,
+            pairwise_all=args.pairwise_all
         )
 
         # 判断是文件还是 Gene ID 列表
@@ -1287,7 +1403,9 @@ def main():
             ref_genome, qry_genome, args.output, ref_name, qry_name, args.identity,
             ref_gff=ref_annotation, qry_gff=qry_annotation,
             min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
-            query_entries=resolved_queries
+            query_entries=resolved_queries,
+            candidate_limit=args.candidate_limit,
+            pairwise_all=args.pairwise_all
         )
 
         # 判断是文件还是区域字符串列表

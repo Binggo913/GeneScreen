@@ -179,6 +179,10 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * CLI and GUI processors iterate all selected query genomes for Gene ID, Location, and Sequence workflows.
   * Ref-query artifacts are written under `queries/<query-name>/ref__<query-name>.*`.
   * `data.json` supports multiple query tracks, ref-query pairs, per-query candidates, and selected default links.
+* Phase 3 pairwise foundation:
+  * Per-query Top-N candidate regions are extracted to `queries/<query-name>/candidates/`.
+  * Query-query pairwise BLAST results are precomputed under `pairwise/<query-a>__<query-b>/`.
+  * `data.json` records query-query pair artifacts for static report switching.
 
 ## Acceptance Criteria
 

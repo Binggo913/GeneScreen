@@ -384,6 +384,39 @@ def build_multi_query_payload(
                 **variant,
             })
 
+    for pairwise_result in result.get("pairwise_results") or []:
+        pair_id = pairwise_result.get("pair_id") or "query__query"
+        comparison_id = sanitize_path_segment(
+            f"{pairwise_result.get('left_query')}_{pairwise_result.get('left_candidate_id')}__"
+            f"{pairwise_result.get('right_query')}_{pairwise_result.get('right_candidate_id')}",
+            "pairwise"
+        )
+        pair_dir = ensure_dir(os.path.join(output_dir, "pairwise", sanitize_path_segment(pair_id, "pairwise")))
+        pair_prefix = os.path.join(pair_dir, comparison_id)
+        blast_copy = copy_if_exists(pairwise_result.get("blast_xml"), f"{pair_prefix}.blast.xml")
+        coords_copy = copy_if_exists(pairwise_result.get("coords"), f"{pair_prefix}.coords")
+        snps_copy = copy_if_exists(pairwise_result.get("snps"), f"{pair_prefix}.snps")
+        hl_copy = write_pair_hl(pairwise_result.get("snps"), f"{pair_prefix}.hl")
+        left_id = sanitize_path_segment(pairwise_result.get("left_query") or "left", "left")
+        right_id = sanitize_path_segment(pairwise_result.get("right_query") or "right", "right")
+        pairs.append({
+            "pair_id": f"{pair_id}::{comparison_id}",
+            "type": "query_query",
+            "ref_genome_id": left_id,
+            "query_genome_id": right_id,
+            "left_candidate_id": pairwise_result.get("left_candidate_id"),
+            "right_candidate_id": pairwise_result.get("right_candidate_id"),
+            "artifacts": {
+                "blast_xml": relpath(blast_copy, report_dir),
+                "coords": relpath(coords_copy, report_dir),
+                "snps": relpath(snps_copy, report_dir),
+                "hl": relpath(hl_copy, report_dir),
+            },
+            "stats": {
+                "variants": parse_variant_stats(pairwise_result.get("snps")),
+            },
+        })
+
     source_ref_fasta = genome_files.get("ref_fasta")
     source_ref_gff = genome_files.get("ref_gff")
     return {
