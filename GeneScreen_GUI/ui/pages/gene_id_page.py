@@ -7,7 +7,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem
+    QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem,
+    QCheckBox
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -287,6 +288,16 @@ class GeneIDPage(QWidget):
         self.downstream_input.setFixedWidth(spin_width)
         self.downstream_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
+        self.candidate_limit_input = QSpinBox()
+        self.candidate_limit_input.setRange(1, 1000)
+        self.candidate_limit_input.setValue(3)
+        self.candidate_limit_input.setFixedHeight(spin_height)
+        self.candidate_limit_input.setProperty("paramInput", True)
+        self.candidate_limit_input.setFixedWidth(spin_width)
+        self.candidate_limit_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+        self.pairwise_all_input = QCheckBox("全量候选")
+
         def make_param_label(text: str) -> QLabel:
             label = QLabel(text)
             label.setFixedHeight(spin_height)
@@ -311,6 +322,14 @@ class GeneIDPage(QWidget):
         row1.addWidget(make_param_label("bp"))
         row1.addStretch()
         param_layout.addRow(row1)
+
+        row2 = QHBoxLayout()
+        row2.addWidget(make_param_label("Pairwise Top-N:"))
+        row2.addWidget(self.candidate_limit_input)
+        row2.addSpacing(16)
+        row2.addWidget(self.pairwise_all_input)
+        row2.addStretch()
+        param_layout.addRow(row2)
         
         # 输出目录
         output_layout = QHBoxLayout()
@@ -761,6 +780,8 @@ class GeneIDPage(QWidget):
         upstream = self.upstream_input.value()
         downstream = self.downstream_input.value()
         min_aln_len = self.min_aln_len_input.value()
+        candidate_limit = self.candidate_limit_input.value()
+        pairwise_all = self.pairwise_all_input.isChecked()
         db = get_database()
         self._history_map = {}
         self._output_dir_map = {}
@@ -793,7 +814,9 @@ class GeneIDPage(QWidget):
             upstream=upstream,
             downstream=downstream,
             min_aln_len=min_aln_len,
-            query_genomes=qry_genomes
+            query_genomes=qry_genomes,
+            candidate_limit=candidate_limit,
+            pairwise_all=pairwise_all
         )
         
         # 启动分析线程

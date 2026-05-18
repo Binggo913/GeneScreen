@@ -183,6 +183,8 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * Per-query Top-N candidate regions are extracted to `queries/<query-name>/candidates/`.
   * Query-query pairwise BLAST results are precomputed under `pairwise/<query-a>__<query-b>/`.
   * `data.json` records query-query pair artifacts for static report switching.
+  * CLI exposes `--candidate-limit` (default `3`) and `--pairwise-all`.
+  * GUI Gene ID, Location, and Sequence pages expose Pairwise Top-N and full-candidate options.
 
 ## Acceptance Criteria
 

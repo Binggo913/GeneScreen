@@ -433,8 +433,8 @@ def build_multi_query_payload(
         "parameters": {
             "identity": identity,
             "min_aln_len": min_aln_len,
-            "candidate_limit": 3,
-            "pairwise_all": False,
+            "candidate_limit": result.get("candidate_limit", 3),
+            "pairwise_all": bool(result.get("pairwise_all", False)),
         },
         "genomes": {
             "ref": {
@@ -583,8 +583,8 @@ def build_single_query_payload(
         "parameters": {
             "identity": identity,
             "min_aln_len": min_aln_len,
-            "candidate_limit": 3,
-            "pairwise_all": False,
+            "candidate_limit": result.get("candidate_limit", 3),
+            "pairwise_all": bool(result.get("pairwise_all", False)),
         },
         "genomes": {
             "ref": {
