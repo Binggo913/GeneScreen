@@ -762,25 +762,8 @@ def write_static_report(
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     index_path = os.path.join(report_dir, "index.html")
-    if payload.get("statistics", {}).get("query_count", 0) > 1:
-        with open(index_path, "w", encoding="utf-8") as handle:
-            handle.write(_render_multi_query_report_html(payload))
-    elif legacy_report and os.path.exists(legacy_report):
-        with open(legacy_report, "r", encoding="utf-8", errors="ignore") as handle:
-            html = handle.read()
-        marker = '<meta name="genescreen-report-schema" content="multi_query_report.v1">'
-        if "</head>" in html and marker not in html:
-            html = html.replace("</head>", f"  {marker}\n</head>", 1)
-        with open(index_path, "w", encoding="utf-8") as handle:
-            handle.write(html)
-    else:
-        with open(index_path, "w", encoding="utf-8") as handle:
-            handle.write(
-                "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">"
-                "<title>GeneScreen Report</title></head><body>"
-                "<h1>GeneScreen Report</h1><p>Report data is available in data.json.</p>"
-                "</body></html>"
-            )
+    with open(index_path, "w", encoding="utf-8") as handle:
+        handle.write(_render_multi_query_report_html(payload))
     return index_path
 
 
@@ -1140,12 +1123,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function renderStats() {
       const s = reportData.statistics || {};
       const variants = (s.selected_combination && s.selected_combination.variants) || {};
+      const indelTotal = variants.INDEL || ((variants.INS || 0) + (variants.DEL || 0));
       const metrics = [
         ['基因组', s.genome_count || 0],
         ['查询基因组', s.query_count || 0],
         ['候选片段', s.total_candidate_count || 0],
         ['可见连接', (s.selected_combination && s.selected_combination.link_count) || 0],
-        ['SNP', variants.SNP || 0],
+        ['SNP 数量', variants.SNP || 0],
+        ['Indel 数量', indelTotal],
         ['INS', variants.INS || 0],
         ['DEL', variants.DEL || 0]
       ];
