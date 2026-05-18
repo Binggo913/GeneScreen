@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT_DIR))
 
 from utils.blast_check import check_blast, check_blast_installation
 from ui.main_window import MainWindow
+from ui.utils.message_box import apply_message_box_theme, install_themed_message_boxes
 
 
 def _apply_qt_app_attributes():
@@ -49,6 +50,13 @@ def main():
         icon = QIcon(str(icon_path))
         app.setWindowIcon(icon)
 
+    # 加载样式表（如果存在）
+    style_path = ROOT_DIR / "ui" / "resources" / "styles.qss"
+    if style_path.exists():
+        with open(style_path, "r", encoding="utf-8") as f:
+            app.setStyleSheet(f.read())
+    install_themed_message_boxes()
+
     # 检查 BLAST+ 是否安装
     if not check_blast():
         link = "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/"
@@ -67,6 +75,7 @@ def main():
         )
         copy_btn = msg.addButton("复制链接", QMessageBox.ActionRole)
         msg.addButton(QMessageBox.Ok)
+        apply_message_box_theme(msg)
         label = msg.findChild(QLabel, "qt_msgbox_label")
         if label:
             label.setTextInteractionFlags(
@@ -80,12 +89,6 @@ def main():
         if msg.clickedButton() == copy_btn:
             QApplication.clipboard().setText(link)
         sys.exit(1)
-
-    # 加载样式表（如果存在）
-    style_path = ROOT_DIR / "ui" / "resources" / "styles.qss"
-    if style_path.exists():
-        with open(style_path, "r", encoding="utf-8") as f:
-            app.setStyleSheet(f.read())
 
     # 创建并显示主窗口
     window = MainWindow()

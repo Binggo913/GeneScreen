@@ -212,12 +212,23 @@ QListWidget[role="selectedQueryList"] {
     border: 1px solid #dcdfe6;
     border-radius: 6px;
     padding: 4px;
+    outline: 0;
+    selection-background-color: #f2f4f7;
+    selection-color: #303133;
 }
 
 QListWidget[role="selectedQueryList"]::item {
     min-height: 26px;
     padding: 4px 8px;
     border-radius: 4px;
+}
+
+QListWidget[role="selectedQueryList"]::item:selected,
+QListWidget[role="selectedQueryList"]::item:selected:active,
+QListWidget[role="selectedQueryList"]::item:selected:!active {
+    background: #f2f4f7;
+    color: #303133;
+    border: 1px solid #667eea;
 }
 
 QCheckBox {

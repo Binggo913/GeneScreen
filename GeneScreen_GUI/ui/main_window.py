@@ -1070,12 +1070,23 @@ class MainWindow(QMainWindow):
                 border: 1px solid {input_border};
                 border-radius: 6px;
                 padding: 4px;
+                outline: 0;
+                selection-background-color: {tab_hover_bg};
+                selection-color: {panel_text};
             }}
 
             QListWidget[role="selectedQueryList"]::item {{
                 min-height: 26px;
                 padding: 4px 8px;
                 border-radius: 4px;
+            }}
+
+            QListWidget[role="selectedQueryList"]::item:selected,
+            QListWidget[role="selectedQueryList"]::item:selected:active,
+            QListWidget[role="selectedQueryList"]::item:selected:!active {{
+                background: {tab_hover_bg};
+                color: {panel_text};
+                border: 1px solid #2f80ff;
             }}
 
             QCheckBox {{

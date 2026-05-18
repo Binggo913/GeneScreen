@@ -202,7 +202,7 @@ class GeneIDPage(QWidget):
         self.gene_id_input = QLineEdit()
         self.gene_id_input.setMinimumHeight(36)
         self.gene_id_input.setProperty("paramInput", True)
-        self.gene_id_input.setPlaceholderText("请选择参考基因组的gene id")
+        self.gene_id_input.setPlaceholderText("--请先选择参考基因组--")
         self.gene_id_input.textEdited.connect(self._on_gene_id_text_edited)
         self.gene_id_input.textChanged.connect(self._on_single_gene_id_changed)
         self.gene_id_input.installEventFilter(self)
@@ -216,7 +216,7 @@ class GeneIDPage(QWidget):
         self._popup_list.itemClicked.connect(self._on_popup_item_clicked)
         self._popup_list.hide()
         
-        self._set_gene_id_loading_state("请选择参考基因组的gene id")
+        self._set_gene_id_loading_state("--请先选择参考基因组--")
         
         # 批量输入
         input_layout.addSpacing(10)
@@ -393,7 +393,7 @@ class GeneIDPage(QWidget):
         self._stop_gene_id_poll()
         self._current_ref_name = name
         if not name:
-            self._set_gene_id_loading_state("请选择参考基因组的gene id", disable=False)
+            self._set_gene_id_loading_state("--请先选择参考基因组--", disable=True)
             self._update_gene_list_path_label("")
             return
         # 注释版本会通过 _on_ref_annotation_changed 触发加载
@@ -457,6 +457,8 @@ class GeneIDPage(QWidget):
         self.gene_id_input.blockSignals(True)
         self.gene_id_input.clear()
         self.gene_id_input.blockSignals(False)
+        self._gene_id_all_ids = []
+        self._gene_id_all_ids_lower = []
         self._gene_id_all_ids_set = set()
         self.gene_id_input.setPlaceholderText(placeholder)
 

@@ -6,7 +6,7 @@ GeneScreen 1.0 - 基因组选择器组件
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
     QLabel, QPushButton, QMessageBox, QListWidget, QListWidgetItem,
-    QSizePolicy
+    QSizePolicy, QAbstractItemView
 )
 from PySide6.QtCore import Signal, Qt, QSize
 
@@ -375,6 +375,9 @@ class GenomePairSelector(QWidget):
             self.qry_list.setProperty("role", "selectedQueryList")
             self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             self.qry_list.setAlternatingRowColors(False)
+            self.qry_list.setFocusPolicy(Qt.NoFocus)
+            self.qry_list.setSelectionMode(QAbstractItemView.SingleSelection)
+            self.qry_list.setEditTriggers(QAbstractItemView.NoEditTriggers)
             self.qry_list.setWordWrap(True)
             self.qry_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.qry_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
