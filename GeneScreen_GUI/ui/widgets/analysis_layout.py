@@ -3,11 +3,13 @@ from typing import Tuple, Type
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
     QFrame,
     QGroupBox,
     QLayout,
     QScrollArea,
     QSizePolicy,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -53,3 +55,44 @@ def create_card(
     layout.setContentsMargins(*margins)
     layout.setSpacing(spacing)
     return card, layout
+
+
+def configure_pairwise_limit_controls(
+    candidate_limit_input: QSpinBox,
+    pairwise_all_input: QCheckBox,
+    default_value: int = 3,
+) -> None:
+    """Keep Pairwise Top-N and full-candidate mode semantically aligned."""
+    normal_min = candidate_limit_input.minimum()
+    normal_max = candidate_limit_input.maximum()
+    default_value = min(max(default_value, normal_min), normal_max)
+    candidate_limit_input.setProperty("lastPairwiseLimit", candidate_limit_input.value() or default_value)
+    candidate_limit_input.setToolTip("限制每个查询基因组参与 pairwise 的候选数量")
+    pairwise_all_input.setToolTip("勾选后使用全部候选，忽略 Pairwise Top-N")
+
+    def sync_candidate_limit(checked: bool) -> None:
+        if checked:
+            current_value = candidate_limit_input.value()
+            if normal_min <= current_value <= normal_max:
+                candidate_limit_input.setProperty("lastPairwiseLimit", current_value)
+            candidate_limit_input.setRange(0, 0)
+            candidate_limit_input.setSpecialValueText(" ")
+            candidate_limit_input.setValue(0)
+            candidate_limit_input.setEnabled(False)
+            candidate_limit_input.setToolTip("全量候选模式下不使用 Pairwise Top-N 限制")
+            return
+
+        saved_value = candidate_limit_input.property("lastPairwiseLimit") or default_value
+        try:
+            restored_value = int(saved_value)
+        except (TypeError, ValueError):
+            restored_value = default_value
+        restored_value = min(max(restored_value, normal_min), normal_max)
+        candidate_limit_input.setEnabled(True)
+        candidate_limit_input.setSpecialValueText("")
+        candidate_limit_input.setRange(normal_min, normal_max)
+        candidate_limit_input.setValue(restored_value)
+        candidate_limit_input.setToolTip("限制每个查询基因组参与 pairwise 的候选数量")
+
+    pairwise_all_input.toggled.connect(sync_candidate_limit)
+    sync_candidate_limit(pairwise_all_input.isChecked())

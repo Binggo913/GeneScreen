@@ -15,7 +15,11 @@ import os
 import re
 
 from ui.widgets.genome_selector import GenomePairSelector
-from ui.widgets.analysis_layout import create_card, create_scroll_content
+from ui.widgets.analysis_layout import (
+    configure_pairwise_limit_controls,
+    create_card,
+    create_scroll_content,
+)
 from core import SequenceProcessor, get_database
 from ui.widgets.report_worker import ReportWorker
 from core.config import get_output_dir
@@ -177,6 +181,7 @@ class SequencePage(QWidget):
         self.candidate_limit_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
         self.pairwise_all_input = QCheckBox("全量候选")
+        configure_pairwise_limit_controls(self.candidate_limit_input, self.pairwise_all_input)
 
         def make_param_label(text: str) -> QLabel:
             label = QLabel(text)
@@ -382,8 +387,8 @@ class SequencePage(QWidget):
         min_aln_len = self.min_aln_len_input.value()
         upstream = self.upstream_input.value()
         downstream = self.downstream_input.value()
-        candidate_limit = self.candidate_limit_input.value()
         pairwise_all = self.pairwise_all_input.isChecked()
+        candidate_limit = None if pairwise_all else self.candidate_limit_input.value()
         db = get_database()
         self._history_map = {}
         self._output_dir_map = {}

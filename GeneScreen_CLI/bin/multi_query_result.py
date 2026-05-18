@@ -44,6 +44,12 @@ def relpath(path: Optional[str], start: str) -> Optional[str]:
         return path
 
 
+def report_candidate_limit(result: Dict[str, Any]) -> Optional[int]:
+    if bool(result.get("pairwise_all", False)):
+        return None
+    return result.get("candidate_limit", 3)
+
+
 def read_fasta_length(fasta_file: Optional[str]) -> int:
     if not fasta_file or not os.path.exists(fasta_file):
         return 0
@@ -465,7 +471,7 @@ def build_multi_query_payload(
         "parameters": {
             "identity": identity,
             "min_aln_len": min_aln_len,
-            "candidate_limit": result.get("candidate_limit", 3),
+            "candidate_limit": report_candidate_limit(result),
             "pairwise_all": bool(result.get("pairwise_all", False)),
             "query_upstream": result.get("query_upstream", 0),
             "query_downstream": result.get("query_downstream", 0),
@@ -621,7 +627,7 @@ def build_single_query_payload(
         "parameters": {
             "identity": identity,
             "min_aln_len": min_aln_len,
-            "candidate_limit": result.get("candidate_limit", 3),
+            "candidate_limit": report_candidate_limit(result),
             "pairwise_all": bool(result.get("pairwise_all", False)),
             "query_upstream": result.get("query_upstream", 0),
             "query_downstream": result.get("query_downstream", 0),

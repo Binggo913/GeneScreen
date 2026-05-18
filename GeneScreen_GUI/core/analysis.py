@@ -132,7 +132,7 @@ def _precompute_pairwise(
     aligner: "BlastAligner",
     output_dir: str,
     identity: float,
-    candidate_limit: int = 3,
+    candidate_limit: Optional[int] = 3,
     pairwise_all: bool = False,
     upstream: int = 0,
     downstream: int = 0,
@@ -144,7 +144,7 @@ def _precompute_pairwise(
         entry = query_entries[index]
         candidates = parse_coords_candidates(query_result.get("coords"))
         if not pairwise_all:
-            candidates = candidates[:candidate_limit]
+            candidates = candidates[:candidate_limit or 3]
         prepared = []
         for candidate in candidates:
             fasta = _extract_candidate_fasta(entry, candidate, output_dir, upstream, downstream)
@@ -721,7 +721,7 @@ class GeneIDProcessor:
         downstream: int = 0,
         min_aln_len: int = 100,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
-        candidate_limit: int = 3,
+        candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
     ):
         self.extractor = SequenceExtractor(ref_genome, ref_annotation, output_dir)
@@ -828,7 +828,7 @@ class LocationProcessor:
         qry_gff: Optional[str] = None,
         min_aln_len: int = 100,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
-        candidate_limit: int = 3,
+        candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
     ):
         self.extractor = SequenceExtractor(ref_genome, None, output_dir)
@@ -936,7 +936,7 @@ class SequenceProcessor:
         query_genomes: Optional[List[Dict[str, Any]]] = None,
         upstream: int = 0,
         downstream: int = 0,
-        candidate_limit: int = 3,
+        candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
     ):
         self.aligner = BlastAligner(output_dir)

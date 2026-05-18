@@ -182,7 +182,7 @@ def precompute_pairwise(
         entry = query_entries[index]
         candidates = parse_coords_candidates(query_result.get("coords"))
         if not pairwise_all:
-            candidates = candidates[:candidate_limit]
+            candidates = candidates[:candidate_limit or 3]
         prepared = []
         for candidate in candidates:
             fasta = extract_candidate_fasta(entry, candidate, output_dir, upstream, downstream)
