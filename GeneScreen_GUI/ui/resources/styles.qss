@@ -243,10 +243,29 @@ QComboBox::down-arrow {
 
 QComboBox QAbstractItemView {
     background: white;
+    color: #303133;
     border: 1px solid #ddd;
     border-radius: 6px;
+    outline: 0;
     selection-background-color: #667eea;
     selection-color: white;
+}
+
+QComboBox QAbstractItemView::item {
+    background: white;
+    color: #303133;
+    min-height: 28px;
+    padding: 4px 10px;
+}
+
+QComboBox QAbstractItemView::item:hover {
+    background: #f2f4f7;
+    color: #303133;
+}
+
+QComboBox QAbstractItemView::item:selected {
+    background: #667eea;
+    color: white;
 }
 
 /* ==================== 滑块样式 ==================== */

@@ -1139,8 +1139,26 @@ class MainWindow(QMainWindow):
                 background: {panel_bg};
                 color: {panel_text};
                 border: 1px solid {panel_border};
+                outline: 0;
                 selection-background-color: #2f80ff;
                 selection-color: white;
+            }}
+
+            QComboBox QAbstractItemView::item {{
+                background: {panel_bg};
+                color: {panel_text};
+                min-height: 28px;
+                padding: 4px 10px;
+            }}
+
+            QComboBox QAbstractItemView::item:hover {{
+                background: {tab_hover_bg};
+                color: {panel_text};
+            }}
+
+            QComboBox QAbstractItemView::item:selected {{
+                background: #2f80ff;
+                color: white;
             }}
 
             QTableWidget, QTableView {{
