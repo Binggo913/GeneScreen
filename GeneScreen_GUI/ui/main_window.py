@@ -1091,6 +1091,30 @@ class MainWindow(QMainWindow):
 
             QCheckBox {{
                 color: {panel_text};
+                min-height: 28px;
+                spacing: 6px;
+            }}
+
+            QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {input_border};
+                border-radius: 4px;
+                background: {input_bg};
+            }}
+
+            QCheckBox::indicator:hover {{
+                border-color: {secondary_button_text};
+            }}
+
+            QCheckBox::indicator:checked {{
+                background: #2f80ff;
+                border: 1px solid #2f80ff;
+            }}
+
+            QCheckBox::indicator:disabled {{
+                background: {secondary_button_bg};
+                border-color: {secondary_button_border};
             }}
 
             QTabWidget::pane {{

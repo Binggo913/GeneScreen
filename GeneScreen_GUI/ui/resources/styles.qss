@@ -237,6 +237,28 @@ QCheckBox {
     spacing: 6px;
 }
 
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #dcdfe6;
+    border-radius: 4px;
+    background: white;
+}
+
+QCheckBox::indicator:hover {
+    border-color: #2f80ff;
+}
+
+QCheckBox::indicator:checked {
+    background: #2f80ff;
+    border: 1px solid #2f80ff;
+}
+
+QCheckBox::indicator:disabled {
+    background: #f3f4f6;
+    border-color: #cfd6e4;
+}
+
 /* ==================== 下拉框样式 ==================== */
 
 QComboBox {

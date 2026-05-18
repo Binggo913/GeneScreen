@@ -371,6 +371,10 @@ class GenomePairSelector(QWidget):
             self.selected_qry_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
             selected_layout.addWidget(self.selected_qry_label)
 
+            selected_content = QVBoxLayout()
+            selected_content.setContentsMargins(0, 0, 0, 0)
+            selected_content.setSpacing(8)
+
             self.qry_list = QuerySelectionList()
             self.qry_list.setProperty("role", "selectedQueryList")
             self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
@@ -381,7 +385,11 @@ class GenomePairSelector(QWidget):
             self.qry_list.setWordWrap(True)
             self.qry_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
             self.qry_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            selected_layout.addWidget(self.qry_list, 1)
+            selected_content.addWidget(self.qry_list)
+
+            remove_layout = QHBoxLayout()
+            remove_layout.setContentsMargins(0, 0, 0, 0)
+            remove_layout.addStretch()
 
             self.remove_qry_btn = QPushButton("移除")
             self.remove_qry_btn.setProperty("secondary", True)
@@ -389,7 +397,9 @@ class GenomePairSelector(QWidget):
             self.remove_qry_btn.setMinimumWidth(112)
             self.remove_qry_btn.setFixedHeight(38)
             self.remove_qry_btn.clicked.connect(self._remove_selected_query)
-            selected_layout.addWidget(self.remove_qry_btn)
+            remove_layout.addWidget(self.remove_qry_btn)
+            selected_content.addLayout(remove_layout)
+            selected_layout.addLayout(selected_content, 1)
             query_box.addWidget(self.selected_qry_row)
             self._sync_selected_query_section()
 

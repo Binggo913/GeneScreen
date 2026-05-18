@@ -14,6 +14,9 @@ GeneScreen 1.0 - 序列分析模块
 
 import os
 import re
+import hashlib
+import shutil
+import tempfile
 from itertools import combinations, product
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
@@ -39,15 +42,33 @@ def run_cmd(cmd: str, error_msg: str = "命令执行失败") -> bool:
     return True
 
 
-def ensure_blast_db(fasta_path: str) -> bool:
-    """确保 BLAST 数据库存在"""
-    db_file = f"{fasta_path}.nin"
+def _blast_safe_fasta_path(fasta_path: str) -> str:
+    """Return a whitespace-free FASTA path for BLAST tools that misparse spaces."""
+    if not re.search(r"\s", fasta_path):
+        return fasta_path
+    source = Path(fasta_path)
+    stat = source.stat()
+    key_src = f"{source.resolve()}|{stat.st_mtime_ns}|{stat.st_size}"
+    digest = hashlib.sha1(key_src.encode("utf-8")).hexdigest()[:16]
+    safe_dir = Path(tempfile.gettempdir()) / "genescreen_blast_inputs" / digest
+    safe_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "".join(source.suffixes) or ".fasta"
+    safe_path = safe_dir / f"input{suffix}"
+    if not safe_path.exists() or safe_path.stat().st_size != stat.st_size:
+        shutil.copyfile(source, safe_path)
+    return str(safe_path)
+
+
+def ensure_blast_db(fasta_path: str) -> Optional[str]:
+    """确保 BLAST 数据库存在，返回可传给 blastn -db 的数据库前缀。"""
+    db_prefix = _blast_safe_fasta_path(fasta_path)
+    db_file = f"{db_prefix}.nin"
     if not os.path.exists(db_file):
         print(f"[INFO] 创建 BLAST 数据库: {fasta_path}")
-        cmd = f'makeblastdb -in "{fasta_path}" -dbtype nucl'
+        cmd = f'makeblastdb -in "{db_prefix}" -dbtype nucl -out "{db_prefix}"'
         if not run_cmd(cmd, "创建 BLAST 数据库失败"):
-            return False
-    return True
+            return None
+    return db_prefix
 
 
 def sanitize_path_segment(text: Any) -> str:
@@ -118,9 +139,10 @@ def _extract_candidate_fasta(
         print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{extract_left}-{extract_right}: {exc}")
         return None
     with open(out_path, "w", encoding="utf-8") as handle:
+        seq_id = sanitize_path_segment(candidate_id) or "candidate"
         handle.write(
-            f">{safe_query}_{candidate_id}|{chrom}:{extract_left}-{extract_right}|"
-            f"match={left}-{right}|strand={strand}|upstream={upstream}|downstream={downstream}\n"
+            f">{seq_id} query={safe_query} region={chrom}:{extract_left}-{extract_right} "
+            f"match={left}-{right} strand={strand} upstream={upstream} downstream={downstream}\n"
         )
         handle.write(f"{seq}\n")
     return out_path
@@ -574,13 +596,14 @@ class BlastAligner:
         safe_prefix_name = re.sub(r'[<>:"/\\|?*]', "_", prefix_name)
         prefix = os.path.join(self.output_dir, safe_prefix_name)
 
-        if not ensure_blast_db(reference):
+        db_prefix = ensure_blast_db(reference)
+        if not db_prefix:
             return None
 
         xml_file = f"{prefix}.blast.xml"
         print(f"[INFO] 运行 BLAST 比对...")
         cmd = (
-            f'blastn -query "{query}" -db "{reference}" '
+            f'blastn -query "{query}" -db "{db_prefix}" '
             f'-out "{xml_file}" -outfmt 5 '
             f"-perc_identity {identity_threshold} "
             f"-num_threads 2"

@@ -20,14 +20,6 @@ from ui.main_window import MainWindow
 from ui.utils.message_box import apply_message_box_theme, install_themed_message_boxes
 
 
-def _apply_qt_app_attributes():
-    attr = getattr(Qt, "AA_DontUseNativeDialogs", None)
-    if attr is None:
-        attr = getattr(getattr(Qt, "ApplicationAttribute", object), "AA_DontUseNativeDialogs", None)
-    if attr is not None:
-        QApplication.setAttribute(attr, True)
-
-
 def main():
     """主程序入口"""
     if sys.platform.startswith("win"):
@@ -38,7 +30,6 @@ def main():
             pass
 
     # 创建应用
-    _apply_qt_app_attributes()
     app = QApplication(sys.argv)
     app.setApplicationName("GeneScreen")
     app.setApplicationVersion("1.0")
