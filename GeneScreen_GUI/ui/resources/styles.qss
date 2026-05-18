@@ -202,6 +202,7 @@ QListWidget::item {
 }
 
 QCheckBox {
+    color: #303133;
     min-height: 28px;
     spacing: 6px;
 }

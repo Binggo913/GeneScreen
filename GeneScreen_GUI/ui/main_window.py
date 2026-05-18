@@ -1007,6 +1007,10 @@ class MainWindow(QMainWindow):
                 background: {panel_bg};
             }}
 
+            QCheckBox {{
+                color: {panel_text};
+            }}
+
             QTabWidget::pane {{
                 background: {panel_bg};
                 border: 1px solid {panel_border};
