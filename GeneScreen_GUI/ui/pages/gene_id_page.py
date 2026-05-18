@@ -225,7 +225,9 @@ class GeneIDPage(QWidget):
 
         import_gene_ids_btn = QPushButton("从文件导入")
         import_gene_ids_btn.setProperty("secondary", True)
-        import_gene_ids_btn.setFixedHeight(32)
+        import_gene_ids_btn.setProperty("compactAction", True)
+        import_gene_ids_btn.setMinimumWidth(132)
+        import_gene_ids_btn.setFixedHeight(38)
         import_gene_ids_btn.clicked.connect(self._import_gene_ids_from_file)
         batch_header.addWidget(import_gene_ids_btn)
         
@@ -242,8 +244,8 @@ class GeneIDPage(QWidget):
         
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("每行一个 ID")
-        self.batch_input.setMinimumHeight(self._batch_gene_id_input_height(2))
-        self.batch_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.batch_input.setFixedHeight(self._batch_gene_id_input_height(2))
+        self.batch_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.batch_input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.batch_input.textChanged.connect(self._on_batch_gene_ids_changed)
         input_layout.addWidget(self.batch_input)
@@ -382,7 +384,7 @@ class GeneIDPage(QWidget):
         if not hasattr(self, "batch_input"):
             return
         line_count = self.batch_input.toPlainText().count("\n") + 1
-        self.batch_input.setMinimumHeight(self._batch_gene_id_input_height(line_count))
+        self.batch_input.setFixedHeight(self._batch_gene_id_input_height(line_count))
         self.batch_input.updateGeometry()
 
     def _on_ref_genome_changed(self, name: str, genome: dict):

@@ -139,6 +139,10 @@ QPushButton[secondary="true"]:pressed {
     background: #dde3ee;
 }
 
+QPushButton[compactAction="true"] {
+    padding: 6px 14px;
+}
+
 QPushButton[primaryAction="true"] {
     background: #2f80ff;
     color: white;

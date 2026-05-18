@@ -1098,6 +1098,10 @@ class MainWindow(QMainWindow):
                 background: {secondary_button_pressed};
             }}
 
+            QPushButton[compactAction="true"] {{
+                padding: 6px 14px;
+            }}
+
             QPushButton[primaryAction="true"] {{
                 background: {primary_button_bg};
                 color: {primary_button_text};
