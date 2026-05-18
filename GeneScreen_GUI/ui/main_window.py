@@ -1117,6 +1117,32 @@ class MainWindow(QMainWindow):
                 border-color: {secondary_button_border};
             }}
 
+            QCheckBox#tableCheckBox {{
+                min-width: 22px;
+                max-width: 22px;
+                min-height: 22px;
+                max-height: 22px;
+                spacing: 0px;
+                padding: 0px;
+                margin: 0px;
+            }}
+
+            QCheckBox#tableCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                margin: 2px;
+            }}
+
+            QCheckBox#tableCheckBox::indicator:checked {{
+                background: #2f80ff;
+                border: 1px solid #2f80ff;
+            }}
+
+            QCheckBox#tableCheckBox::indicator:disabled {{
+                background: {secondary_button_bg};
+                border-color: {secondary_button_border};
+            }}
+
             QTabWidget::pane {{
                 background: {panel_bg};
                 border: 1px solid {panel_border};

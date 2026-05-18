@@ -259,6 +259,32 @@ QCheckBox::indicator:disabled {
     border-color: #cfd6e4;
 }
 
+QCheckBox#tableCheckBox {
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    spacing: 0px;
+    padding: 0px;
+    margin: 0px;
+}
+
+QCheckBox#tableCheckBox::indicator {
+    width: 18px;
+    height: 18px;
+    margin: 2px;
+}
+
+QCheckBox#tableCheckBox::indicator:checked {
+    background: #2f80ff;
+    border: 1px solid #2f80ff;
+}
+
+QCheckBox#tableCheckBox::indicator:disabled {
+    background: #f3f4f6;
+    border-color: #cfd6e4;
+}
+
 /* ==================== 下拉框样式 ==================== */
 
 QComboBox {

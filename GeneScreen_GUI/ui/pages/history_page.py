@@ -20,6 +20,17 @@ from core import get_database
 from core.config import get_output_dir
 from ui.utils.icon_utils import draw_sidebar_icon
 
+TABLE_CHECKBOX_COLUMN_WIDTH = 52
+TABLE_CHECKBOX_SIZE = 22
+
+
+def _configure_table_checkbox(checkbox: QCheckBox) -> QCheckBox:
+    checkbox.setObjectName("tableCheckBox")
+    checkbox.setText("")
+    checkbox.setFixedSize(TABLE_CHECKBOX_SIZE, TABLE_CHECKBOX_SIZE)
+    checkbox.setFocusPolicy(Qt.NoFocus)
+    return checkbox
+
 
 class HistoryPage(QWidget):
     """历史记录页面"""
@@ -77,13 +88,18 @@ class HistoryPage(QWidget):
             "", "ID", "模式", "时间", "报告", "结果路径"
         ])
         self.history_table.setIconSize(QSize(18, 18))
-        self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
         self.history_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.history_table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
         self.history_table.verticalHeader().setVisible(False)
+        self.history_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
+        self.history_table.verticalHeader().setDefaultSectionSize(
+            max(self.history_table.verticalHeader().defaultSectionSize(), 36)
+        )
         self.history_table.setSelectionMode(QTableWidget.NoSelection)
         self.history_table.setAlternatingRowColors(True)
         self.history_table.cellClicked.connect(self._on_cell_clicked)
@@ -91,6 +107,7 @@ class HistoryPage(QWidget):
         layout.addWidget(panel)
 
         self.history_select_all = QCheckBox(self.history_table.horizontalHeader())
+        _configure_table_checkbox(self.history_select_all)
         self.history_select_all.setTristate(False)
         self.history_select_all.stateChanged.connect(self._toggle_history_all)
         header = self.history_table.horizontalHeader()
@@ -115,14 +132,15 @@ class HistoryPage(QWidget):
             return created_at[:19]
 
     def _make_checkbox_cell(self, checked: bool = False):
-        checkbox = QCheckBox()
+        checkbox = _configure_table_checkbox(QCheckBox())
         checkbox.setChecked(checked)
         checkbox.stateChanged.connect(self._update_history_header_checkbox)
         checkbox_widget = QWidget()
         checkbox_layout = QHBoxLayout(checkbox_widget)
-        checkbox_layout.addWidget(checkbox)
+        checkbox_layout.addWidget(checkbox, 0, Qt.AlignCenter)
         checkbox_layout.setAlignment(Qt.AlignCenter)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        checkbox_layout.setSpacing(0)
         return checkbox_widget, checkbox
 
     def _get_checked_record_ids(self):
@@ -145,7 +163,7 @@ class HistoryPage(QWidget):
         x = header.sectionPosition(0)
         w = header.sectionSize(0)
         h = header.height()
-        size = 16
+        size = TABLE_CHECKBOX_SIZE
         self.history_select_all.setGeometry(
             x + (w - size) // 2,
             (h - size) // 2,
