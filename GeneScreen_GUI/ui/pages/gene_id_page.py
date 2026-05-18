@@ -347,6 +347,10 @@ class GeneIDPage(QWidget):
         output_layout.addWidget(self.output_dir, 1)
         
         browse_btn = QPushButton("浏览...")
+        browse_btn.setProperty("secondary", True)
+        browse_btn.setProperty("compactAction", True)
+        browse_btn.setMinimumWidth(96)
+        browse_btn.setFixedHeight(38)
         browse_btn.clicked.connect(self._browse_output)
         output_layout.addWidget(browse_btn)
         param_layout.addRow("输出目录:", output_layout)

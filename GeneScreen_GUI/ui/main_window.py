@@ -1106,6 +1106,11 @@ class MainWindow(QMainWindow):
                 padding: 6px 14px;
             }}
 
+            QPushButton[smallAction="true"] {{
+                font-size: 11px;
+                padding: 2px 6px;
+            }}
+
             QPushButton[primaryAction="true"] {{
                 background: {primary_button_bg};
                 color: {primary_button_text};

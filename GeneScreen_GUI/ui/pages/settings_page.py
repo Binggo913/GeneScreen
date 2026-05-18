@@ -48,6 +48,10 @@ class SettingsPage(QWidget):
         self.db_path_input.editingFinished.connect(self._save_settings)
 
         browse_btn = QPushButton("浏览...")
+        browse_btn.setProperty("secondary", True)
+        browse_btn.setProperty("compactAction", True)
+        browse_btn.setMinimumWidth(96)
+        browse_btn.setFixedHeight(38)
         browse_btn.clicked.connect(self._browse_db_dir)
         path_layout.addWidget(browse_btn)
 
@@ -72,6 +76,10 @@ class SettingsPage(QWidget):
         self.output_path_input.editingFinished.connect(self._save_output_settings)
 
         output_browse_btn = QPushButton("浏览...")
+        output_browse_btn.setProperty("secondary", True)
+        output_browse_btn.setProperty("compactAction", True)
+        output_browse_btn.setMinimumWidth(96)
+        output_browse_btn.setFixedHeight(38)
         output_browse_btn.clicked.connect(self._browse_output_dir)
         output_path_layout.addWidget(output_browse_btn)
 

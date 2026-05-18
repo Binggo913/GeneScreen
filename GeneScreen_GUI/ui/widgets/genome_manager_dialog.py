@@ -238,6 +238,10 @@ class GenomeManagerDialog(QDialog):
         fasta_layout.addWidget(self.add_fasta, 1)
         
         fasta_btn = QPushButton("浏览...")
+        fasta_btn.setProperty("secondary", True)
+        fasta_btn.setProperty("compactAction", True)
+        fasta_btn.setMinimumWidth(96)
+        fasta_btn.setFixedHeight(38)
         fasta_btn.clicked.connect(self._browse_fasta)
         fasta_layout.addWidget(fasta_btn)
         form_layout.addRow("FASTA:", fasta_layout)
@@ -249,6 +253,10 @@ class GenomeManagerDialog(QDialog):
         gff_layout.addWidget(self.add_gff, 1)
         
         gff_btn = QPushButton("浏览...")
+        gff_btn.setProperty("secondary", True)
+        gff_btn.setProperty("compactAction", True)
+        gff_btn.setMinimumWidth(96)
+        gff_btn.setFixedHeight(38)
         gff_btn.clicked.connect(self._browse_gff)
         gff_layout.addWidget(gff_btn)
         form_layout.addRow("注释:", gff_layout)
