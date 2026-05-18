@@ -166,6 +166,7 @@ class GeneIDPage(QWidget):
         self._active_report_job = None
         self._pending_finish_message = ""
         self._current_ref_name = ""
+        self._last_ref_annotation_load_key = None
         # 防抖定时器
         self._debounce_timer = None
         self._init_ui()
@@ -395,28 +396,52 @@ class GeneIDPage(QWidget):
         """参考基因组改变时，等待注释版本选择"""
         self._stop_gene_id_poll()
         self._current_ref_name = name
+        self._last_ref_annotation_load_key = None
         if not name:
             self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER, disable=True)
             self._update_gene_list_path_label("")
             return
-        # 注释版本会通过 _on_ref_annotation_changed 触发加载
-    
-    def _on_ref_annotation_changed(self, source: str, ann: dict):
-        """参考基因组注释版本改变时，加载对应的 gene id 列表"""
-        self._stop_gene_id_poll()
+        QTimer.singleShot(0, self._sync_ref_annotation_from_selector)
 
-        if not self._current_ref_name:
+    def _sync_ref_annotation_from_selector(self):
+        """同步当前参考注释，避免注释下拉框未发出变更信号时状态卡住。"""
+        ref_genome = self.genome_selector.get_ref_genome() if hasattr(self, "genome_selector") else {}
+        ref_name = ref_genome.get("name", "")
+        if not ref_name:
+            self._current_ref_name = ""
             self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER, disable=True)
             self._update_gene_list_path_label("")
             return
+
+        self._current_ref_name = ref_name
+        ann = self.genome_selector.get_ref_annotation() if hasattr(self, "genome_selector") else {}
+        source = ann.get("source", "") if ann else ""
+        self._on_ref_annotation_changed(source, ann)
+
+    def _on_ref_annotation_changed(self, source: str, ann: dict):
+        """参考基因组注释版本改变时，加载对应的 gene id 列表"""
+        if not self._current_ref_name:
+            ref_genome = self.genome_selector.get_ref_genome() if hasattr(self, "genome_selector") else {}
+            self._current_ref_name = ref_genome.get("name", "")
+            if not self._current_ref_name:
+                self._stop_gene_id_poll()
+                self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER, disable=True)
+                self._update_gene_list_path_label("")
+                return
         
         if not source or not ann:
+            self._stop_gene_id_poll()
             self._set_gene_id_loading_state("该基因组无注释文件，无法使用 Gene ID 模式", disable=True)
             self._update_gene_list_path_label("")
             return
         
         gene_ids_path = ann.get("gene_ids_path", "")
         ann_path = ann.get("annotation_path", "")
+        load_key = (self._current_ref_name, source, ann_path, gene_ids_path)
+        if load_key == self._last_ref_annotation_load_key:
+            return
+        self._last_ref_annotation_load_key = load_key
+        self._stop_gene_id_poll()
         
         # 更新 gene list 路径显示
         if gene_ids_path:
