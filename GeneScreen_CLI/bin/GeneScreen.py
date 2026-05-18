@@ -571,7 +571,7 @@ class BlastAligner:
                 f_coords.write(
                     "[S1]\t[E1]\t[S2]\t[E2]\t[LEN1]\t[LEN2]\t[%IDY]\t[REF]\t[QUERY]\n"
                 )
-                f_snps.write("[P1]\t[REF]\t[ALT]\t[P2]\t[TYPE]\t[REF_NAME]\t[QUERY_NAME]\n")
+                f_snps.write("[QRY_POS]\t[REF]\t[ALT]\t[REF_POS]\t[TYPE]\t[QRY_NAME]\t[REF_NAME]\n")
 
                 for record in blast_records:
                     query_name = record.query
@@ -615,28 +615,11 @@ class BlastAligner:
             r_base = ref_seq[i]
 
             if q_base == "-":
-                # 删除
-                del_seq = ""
-                while i < len(query_seq) and query_seq[i] == "-":
-                    del_seq += ref_seq[i]
-                    i += 1
-                variants.append(
-                    {
-                        "ref_pos": ref_pos,
-                        "query_pos": query_pos,
-                        "ref": del_seq,
-                        "alt": "-",
-                        "type": "DEL",
-                    }
-                )
-                ref_pos += ref_step * len(del_seq)
-                continue
-
-            elif r_base == "-":
-                # 插入
+                # BLAST query is the ref-derived sequence; a gap there means
+                # the query genome has an insertion relative to that ref.
                 ins_seq = ""
-                while i < len(ref_seq) and ref_seq[i] == "-":
-                    ins_seq += query_seq[i]
+                while i < len(query_seq) and query_seq[i] == "-":
+                    ins_seq += ref_seq[i]
                     i += 1
                 variants.append(
                     {
@@ -647,7 +630,26 @@ class BlastAligner:
                         "type": "INS",
                     }
                 )
-                query_pos += query_step * len(ins_seq)
+                ref_pos += ref_step * len(ins_seq)
+                continue
+
+            elif r_base == "-":
+                # BLAST subject is the query-genome hit; a gap there means
+                # the query genome has a deletion relative to the ref.
+                del_seq = ""
+                while i < len(ref_seq) and ref_seq[i] == "-":
+                    del_seq += query_seq[i]
+                    i += 1
+                variants.append(
+                    {
+                        "ref_pos": ref_pos,
+                        "query_pos": query_pos,
+                        "ref": del_seq,
+                        "alt": "-",
+                        "type": "DEL",
+                    }
+                )
+                query_pos += query_step * len(del_seq)
                 continue
 
             elif q_base != r_base:
@@ -656,8 +658,8 @@ class BlastAligner:
                     {
                         "ref_pos": ref_pos,
                         "query_pos": query_pos,
-                        "ref": r_base,
-                        "alt": q_base,
+                        "ref": q_base,
+                        "alt": r_base,
                         "type": "SNP",
                     }
                 )

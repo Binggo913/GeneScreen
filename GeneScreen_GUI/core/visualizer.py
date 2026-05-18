@@ -498,8 +498,8 @@ class LinkviewVisualizer:
         
         标记逻辑：
         - SNP：两个轨道都标注（两边都有碱基）
-        - INS（插入）：只在基因序列轨道标注（参考基因组上没有这个碱基）
-        - DEL（缺失）：只在参考基因组轨道标注（基因序列上没有这个碱基）
+        - INS（查询相对 ref 插入）：只在查询基因组轨道标注
+        - DEL（查询相对 ref 缺失）：只在 ref 来源序列轨道标注
         """
         suffix = f".{output_suffix}" if output_suffix else ""
         hl_file = os.path.join(self.output_dir, f"{gene_id}{suffix}.hl")
@@ -546,11 +546,11 @@ class LinkviewVisualizer:
                                         hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
                                         hf.write(f"{chr_name}\t{ref_pos-1}\t{ref_pos}\t{color}\n")
                                     elif var_type == 'INS':
-                                        # INS：只在基因序列轨道标注（参考基因组上没有）
-                                        hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
-                                    elif var_type == 'DEL':
-                                        # DEL：只在参考基因组轨道标注（基因序列上没有）
+                                        # INS：查询基因组相对 ref 多出的碱基，标在查询基因组轨道
                                         hf.write(f"{chr_name}\t{ref_pos-1}\t{ref_pos}\t{color}\n")
+                                    elif var_type == 'DEL':
+                                        # DEL：查询基因组相对 ref 缺失的碱基，标在 ref 来源序列轨道
+                                        hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
                                 except (ValueError, IndexError):
                                     continue
             
@@ -1078,9 +1078,9 @@ class LinkviewVisualizer:
                                         hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
                                         hf.write(f"{chr_name}\t{ref_pos-1}\t{ref_pos}\t{color}\n")
                                     elif var_type == 'INS':
-                                        hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
-                                    elif var_type == 'DEL':
                                         hf.write(f"{chr_name}\t{ref_pos-1}\t{ref_pos}\t{color}\n")
+                                    elif var_type == 'DEL':
+                                        hf.write(f"{qry_name}\t{qry_pos-1}\t{qry_pos}\t{color}\n")
                                 except (ValueError, IndexError):
                                     continue
             
@@ -2153,14 +2153,14 @@ class BaseVisualizer:
                                 if (variant.type === 'INS') {{
                                     content = `
                                         <div class="tooltip-title">${{t('insertion')}}</div>
-                                        <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
+                                        <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
                                         <div class="tooltip-row"><span class="tooltip-label">${{t('insertSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                         <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                     `;
                                 }} else {{
                                     content = `
                                         <div class="tooltip-title">${{t('deletion')}}</div>
-                                        <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
+                                        <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
                                         <div class="tooltip-row"><span class="tooltip-label">${{t('deleteSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                         <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                     `;
@@ -2959,14 +2959,14 @@ class BaseVisualizer:
                             if (variant.type === 'INS') {{
                                 content = `
                                     <div class="tooltip-title">${{t('insertion')}}</div>
-                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
+                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('insertSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                 `;
                             }} else {{
                                 content = `
                                     <div class="tooltip-title">${{t('deletion')}}</div>
-                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
+                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('deleteSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                 `;
@@ -3236,14 +3236,14 @@ class BaseVisualizer:
                             if (variant.type === 'INS') {{
                                 content = `
                                     <div class="tooltip-title">${{t('insertion')}}</div>
-                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
+                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('insertSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                 `;
                             }} else {{
                                 content = `
                                     <div class="tooltip-title">${{t('deletion')}}</div>
-                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.ref_pos}}</div>
+                                    <div class="tooltip-row"><span class="tooltip-label">${{t('position')}}:</span> ${{variant.qry_pos}}</div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('deleteSeq')}}:</span> <span class="tooltip-seq">${{variant.seq}}</span></div>
                                     <div class="tooltip-row"><span class="tooltip-label">${{t('length')}}:</span> ${{variant.length}} bp</div>
                                 `;

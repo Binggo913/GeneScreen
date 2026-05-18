@@ -239,8 +239,8 @@ class ResultViewer(QWidget):
         self.variants_table.setRowCount(len(variants))
         for i, v in enumerate(variants):
             self.variants_table.setItem(i, 0, QTableWidgetItem(v['type']))
-            self.variants_table.setItem(i, 1, QTableWidgetItem(v['ref_pos']))
-            self.variants_table.setItem(i, 2, QTableWidgetItem(v['qry_pos']))
+            self.variants_table.setItem(i, 1, QTableWidgetItem(v['qry_pos']))
+            self.variants_table.setItem(i, 2, QTableWidgetItem(v['ref_pos']))
             self.variants_table.setItem(i, 3, QTableWidgetItem(v['ref_base']))
             self.variants_table.setItem(i, 4, QTableWidgetItem(v['alt_base']))
             
