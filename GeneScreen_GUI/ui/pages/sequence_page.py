@@ -112,22 +112,24 @@ class SequencePage(QWidget):
         seq_label.setProperty("role", "muted")
         input_layout.addWidget(seq_label)
         
-        self.sequence_input = QTextEdit()
-        self.sequence_input.setPlaceholderText(
-            ">seq1\nATGCATGCATGC...\n>seq2\nGCTAGCTAGCTA...\n\n"
-            "或直接输入纯序列 (自动命名为 query_seq_1, query_seq_2...)"
-        )
-        self.sequence_input.setMinimumHeight(150)
-        input_layout.addWidget(self.sequence_input)
-        
         # 从文件加载
         file_layout = QHBoxLayout()
         file_layout.addStretch()
         
         load_btn = QPushButton("📂 从文件加载")
+        load_btn.setMinimumWidth(150)
+        load_btn.setFixedHeight(36)
         load_btn.clicked.connect(self._load_from_file)
         file_layout.addWidget(load_btn)
         input_layout.addLayout(file_layout)
+
+        self.sequence_input = QTextEdit()
+        self.sequence_input.setPlaceholderText(
+            ">seq1\nATGCATGCATGC...\n>seq2\nGCTAGCTAGCTA...\n\n"
+            "或直接输入纯序列 (自动命名为 query_seq_1, query_seq_2...)"
+        )
+        self.sequence_input.setMinimumHeight(170)
+        input_layout.addWidget(self.sequence_input)
         
         layout.addWidget(input_group)
         
