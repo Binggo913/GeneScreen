@@ -147,6 +147,34 @@ def parse_coords_candidates(coords_file: Optional[str], ref_length: int = 0) -> 
     return candidates
 
 
+def apply_query_flank_metadata(
+    candidates: List[Dict[str, Any]],
+    upstream: int = 0,
+    downstream: int = 0,
+) -> List[Dict[str, Any]]:
+    if upstream <= 0 and downstream <= 0:
+        return candidates
+    for candidate in candidates:
+        left = min(int(candidate.get("query_start") or 0), int(candidate.get("query_end") or 0))
+        right = max(int(candidate.get("query_start") or 0), int(candidate.get("query_end") or 0))
+        if left <= 0 or right <= 0:
+            continue
+        strand = candidate.get("strand", "+")
+        if strand == "-":
+            region_start = max(1, left - downstream)
+            region_end = right + upstream
+        else:
+            region_start = max(1, left - upstream)
+            region_end = right + downstream
+        candidate["query_match_start"] = left
+        candidate["query_match_end"] = right
+        candidate["query_region_start"] = region_start
+        candidate["query_region_end"] = region_end
+        candidate["query_upstream"] = upstream
+        candidate["query_downstream"] = downstream
+    return candidates
+
+
 def parse_variant_stats(snps_file: Optional[str]) -> Dict[str, int]:
     stats = {"SNP": 0, "INS": 0, "DEL": 0, "INDEL": 0, "total": 0}
     if not snps_file or not os.path.exists(snps_file):
@@ -308,7 +336,11 @@ def build_multi_query_payload(
         coords_copy = copy_if_exists(query_result.get("coords"), f"{pair_prefix}.coords")
         snps_copy = copy_if_exists(query_result.get("snps"), f"{pair_prefix}.snps")
         hl_copy = write_pair_hl(query_result.get("snps"), f"{pair_prefix}.hl")
-        candidates = parse_coords_candidates(query_result.get("coords"), ref_length)
+        candidates = apply_query_flank_metadata(
+            parse_coords_candidates(query_result.get("coords"), ref_length),
+            int(result.get("query_upstream") or 0),
+            int(result.get("query_downstream") or 0),
+        )
         variants = parse_variants(query_result.get("snps"))
         stats = parse_variant_stats(query_result.get("snps"))
         selected_candidate = candidates[0] if candidates else None
@@ -435,6 +467,8 @@ def build_multi_query_payload(
             "min_aln_len": min_aln_len,
             "candidate_limit": result.get("candidate_limit", 3),
             "pairwise_all": bool(result.get("pairwise_all", False)),
+            "query_upstream": result.get("query_upstream", 0),
+            "query_downstream": result.get("query_downstream", 0),
         },
         "genomes": {
             "ref": {
@@ -536,7 +570,11 @@ def build_single_query_payload(
     hl_copy = write_pair_hl(result.get("snps"), f"{pair_prefix}.hl")
 
     ref_length = read_fasta_length(result.get("fasta"))
-    candidates = parse_coords_candidates(result.get("coords"), ref_length)
+    candidates = apply_query_flank_metadata(
+        parse_coords_candidates(result.get("coords"), ref_length),
+        int(result.get("query_upstream") or 0),
+        int(result.get("query_downstream") or 0),
+    )
     stats = parse_variant_stats(result.get("snps"))
     variants = parse_variants(result.get("snps"))
     selected_candidate = candidates[0] if candidates else None
@@ -585,6 +623,8 @@ def build_single_query_payload(
             "min_aln_len": min_aln_len,
             "candidate_limit": result.get("candidate_limit", 3),
             "pairwise_all": bool(result.get("pairwise_all", False)),
+            "query_upstream": result.get("query_upstream", 0),
+            "query_downstream": result.get("query_downstream", 0),
         },
         "genomes": {
             "ref": {
@@ -858,9 +898,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
           const start = Math.max(0, ((candidate.query_start || 1) / maxEnd) * 100);
           const end = Math.max(start + 0.5, ((candidate.query_end || candidate.query_start || 1) / maxEnd) * 100);
+          const region = candidate.query_region_start ? `${{candidate.query_chr}}:${{candidate.query_region_start}}-${{candidate.query_region_end}}` : `${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`;
+          const match = candidate.query_match_start ? ` match=${{candidate.query_match_start}}-${{candidate.query_match_end}}` : '';
           el.style.left = `${{Math.min(start, 99)}}%`;
           el.style.width = `${{Math.max(0.5, Math.min(end - start, 100 - start))}}%`;
-          el.title = `${{candidate.candidate_id}} ${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`;
+          el.title = `${{candidate.candidate_id}} ${{region}}${{match}}`;
           el.onclick = () => {{ state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); }};
           lane.appendChild(el);
         }}
@@ -901,7 +943,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         row.draggable = trackId !== 'ref';
         row.dataset.trackId = trackId;
         const candidate = trackId === 'ref' ? null : candidateById(trackId, state.selected[trackId]);
-        const label = candidate ? `${{track.name}} · ${{candidate.candidate_id}} · ${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}` : `${{track.name}} · ref`;
+        const region = candidate && candidate.query_region_start ? `${{candidate.query_chr}}:${{candidate.query_region_start}}-${{candidate.query_region_end}}` : null;
+        const label = candidate ? `${{track.name}} · ${{candidate.candidate_id}} · ${{region || `${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`}}` : `${{track.name}} · ref`;
         row.innerHTML = `<div class="track-label" title="${{label}}">${{label}}</div><div class="lane"></div>`;
         const lane = row.querySelector('.lane');
         if (candidate) {{

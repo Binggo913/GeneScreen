@@ -82,7 +82,13 @@ def _normalize_query_entries(
     return entries
 
 
-def _extract_candidate_fasta(query_entry: Dict[str, Any], candidate: Dict[str, Any], output_dir: str) -> Optional[str]:
+def _extract_candidate_fasta(
+    query_entry: Dict[str, Any],
+    candidate: Dict[str, Any],
+    output_dir: str,
+    upstream: int = 0,
+    downstream: int = 0,
+) -> Optional[str]:
     chrom = candidate.get("query_chr")
     start = int(candidate.get("query_start") or 0)
     end = int(candidate.get("query_end") or 0)
@@ -95,15 +101,27 @@ def _extract_candidate_fasta(query_entry: Dict[str, Any], candidate: Dict[str, A
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{candidate_id}.fasta")
     left, right = min(start, end), max(start, end)
+    strand = candidate.get("strand", "+")
+    if strand == "-":
+        extract_left = max(1, left - downstream)
+        extract_right = right + upstream
+    else:
+        extract_left = max(1, left - upstream)
+        extract_right = right + downstream
     try:
         fasta = Fasta(fasta_path)
-        seq = fasta[chrom][left - 1:right].seq
+        chrom_len = len(fasta[chrom])
+        extract_right = min(chrom_len, extract_right)
+        seq = fasta[chrom][extract_left - 1:extract_right].seq
         fasta.close()
     except Exception as exc:
-        print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{left}-{right}: {exc}")
+        print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{extract_left}-{extract_right}: {exc}")
         return None
     with open(out_path, "w", encoding="utf-8") as handle:
-        handle.write(f">{safe_query}_{candidate_id}|{chrom}:{left}-{right}|strand={candidate.get('strand', '+')}\n")
+        handle.write(
+            f">{safe_query}_{candidate_id}|{chrom}:{extract_left}-{extract_right}|"
+            f"match={left}-{right}|strand={strand}|upstream={upstream}|downstream={downstream}\n"
+        )
         handle.write(f"{seq}\n")
     return out_path
 
@@ -116,6 +134,8 @@ def _precompute_pairwise(
     identity: float,
     candidate_limit: int = 3,
     pairwise_all: bool = False,
+    upstream: int = 0,
+    downstream: int = 0,
 ) -> List[Dict[str, Any]]:
     bundles = []
     for index, query_result in enumerate(query_results):
@@ -127,7 +147,7 @@ def _precompute_pairwise(
             candidates = candidates[:candidate_limit]
         prepared = []
         for candidate in candidates:
-            fasta = _extract_candidate_fasta(entry, candidate, output_dir)
+            fasta = _extract_candidate_fasta(entry, candidate, output_dir, upstream, downstream)
             if fasta:
                 prepared.append({"candidate": candidate, "fasta": fasta})
         bundles.append({"entry": entry, "safe": sanitize_path_segment(entry.get("name") or "query") or "query", "candidates": prepared})
@@ -914,6 +934,8 @@ class SequenceProcessor:
         ref_gff: Optional[str] = None,
         min_aln_len: int = 100,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
+        upstream: int = 0,
+        downstream: int = 0,
         candidate_limit: int = 3,
         pairwise_all: bool = False,
     ):
@@ -926,6 +948,8 @@ class SequenceProcessor:
         self.ref_name = self.query_entries[0]["name"] if self.query_entries else ref_name
         self.identity = identity
         self.min_aln_len = min_aln_len
+        self.upstream = upstream
+        self.downstream = downstream
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         self.genome_files = {
@@ -959,10 +983,13 @@ class SequenceProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all
+            self.identity, self.candidate_limit, self.pairwise_all,
+            self.upstream, self.downstream
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         return result
 
     def set_output_dir(self, output_dir: str):
@@ -995,6 +1022,8 @@ class SequenceProcessor:
         result["ref_name"] = self.ref_name
         result["identity"] = self.identity
         result["min_aln_len"] = self.min_aln_len
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         result["genome_files"] = self.genome_files
 
         return result
@@ -1019,6 +1048,8 @@ class SequenceProcessor:
         result["ref_name"] = self.ref_name
         result["identity"] = self.identity
         result["min_aln_len"] = self.min_aln_len
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         result["genome_files"] = self.genome_files
 
         return result

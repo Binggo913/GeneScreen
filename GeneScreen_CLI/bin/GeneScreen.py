@@ -126,7 +126,7 @@ def normalize_query_entries(query_genome=None, qry_name="", qry_gff=None, query_
     return [entry for entry in normalized if entry.get("fasta")]
 
 
-def extract_candidate_fasta(query_entry, candidate, output_dir):
+def extract_candidate_fasta(query_entry, candidate, output_dir, upstream=0, downstream=0):
     chrom = candidate.get("query_chr")
     start = int(candidate.get("query_start") or 0)
     end = int(candidate.get("query_end") or 0)
@@ -139,20 +139,42 @@ def extract_candidate_fasta(query_entry, candidate, output_dir):
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, f"{candidate_id}.fasta")
     left, right = min(start, end), max(start, end)
+    strand = candidate.get("strand", "+")
+    if strand == "-":
+        extract_left = max(1, left - downstream)
+        extract_right = right + upstream
+    else:
+        extract_left = max(1, left - upstream)
+        extract_right = right + downstream
     try:
         fasta = Fasta(fasta_path)
-        seq = fasta[chrom][left - 1:right].seq
+        chrom_len = len(fasta[chrom])
+        extract_right = min(chrom_len, extract_right)
+        seq = fasta[chrom][extract_left - 1:extract_right].seq
         fasta.close()
     except Exception as exc:
-        print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{left}-{right}: {exc}")
+        print(f"[WARNING] 无法提取候选序列 {query_entry.get('name')}:{chrom}:{extract_left}-{extract_right}: {exc}")
         return None
     with open(out_path, "w", encoding="utf-8") as handle:
-        handle.write(f">{safe_query}_{candidate_id}|{chrom}:{left}-{right}|strand={candidate.get('strand', '+')}\n")
+        handle.write(
+            f">{safe_query}_{candidate_id}|{chrom}:{extract_left}-{extract_right}|"
+            f"match={left}-{right}|strand={strand}|upstream={upstream}|downstream={downstream}\n"
+        )
         handle.write(f"{seq}\n")
     return out_path
 
 
-def precompute_pairwise(query_results, query_entries, aligner, output_dir, identity, candidate_limit=3, pairwise_all=False):
+def precompute_pairwise(
+    query_results,
+    query_entries,
+    aligner,
+    output_dir,
+    identity,
+    candidate_limit=3,
+    pairwise_all=False,
+    upstream=0,
+    downstream=0,
+):
     bundles = []
     for index, query_result in enumerate(query_results):
         if index >= len(query_entries):
@@ -163,7 +185,7 @@ def precompute_pairwise(query_results, query_entries, aligner, output_dir, ident
             candidates = candidates[:candidate_limit]
         prepared = []
         for candidate in candidates:
-            fasta = extract_candidate_fasta(entry, candidate, output_dir)
+            fasta = extract_candidate_fasta(entry, candidate, output_dir, upstream, downstream)
             if fasta:
                 prepared.append({"candidate": candidate, "fasta": fasta})
         bundles.append({"entry": entry, "safe": sanitize_path_segment(entry.get("name") or "query") or "query", "candidates": prepared})
@@ -1026,7 +1048,21 @@ class LocationProcessor:
 class SequenceProcessor:
     """Sequence 模式处理器"""
 
-    def __init__(self, ref_genome, output_dir, ref_name="", identity=90, ref_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None, candidate_limit=3, pairwise_all=False):
+    def __init__(
+        self,
+        ref_genome,
+        output_dir,
+        ref_name="",
+        identity=90,
+        ref_gff=None,
+        min_aln_len=100,
+        merge_gap=1000,
+        query_entries=None,
+        upstream=0,
+        downstream=0,
+        candidate_limit=3,
+        pairwise_all=False,
+    ):
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
         self.query_entries = normalize_query_entries(ref_genome, ref_name, ref_gff, query_entries)
@@ -1035,6 +1071,8 @@ class SequenceProcessor:
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.upstream = upstream
+        self.downstream = downstream
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         # 保存基因组文件路径
@@ -1070,10 +1108,13 @@ class SequenceProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all
+            self.identity, self.candidate_limit, self.pairwise_all,
+            self.upstream, self.downstream
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         return result
 
     def process(self, seq_file):
@@ -1132,6 +1173,8 @@ class SequenceProcessor:
         result["fasta"] = fasta_file
         result["id"] = safe_seq_id
         result["sequence"] = sequence
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
 
         # 可视化
         visualizer = SequenceVisualizer(
@@ -1224,13 +1267,14 @@ def main():
   # Location 模式（从文件读取）
   python GeneScreen.py -ref Nippon -qry ZS97 -loc positions.txt -o output/
 
-  # Sequence 模式（支持多序列 FASTA）
-  python GeneScreen.py -ref Nippon -seq query.fasta -o output/
+  # Sequence 模式（支持多序列 FASTA，查询基因组可多选）
+  python GeneScreen.py -qry ZS97 -seq query.fasta -o output/
+  python GeneScreen.py -qry ZS97 -qry MH63 -seq query.fasta -u 2000 -d 1000 -o output/
         """,
     )
 
     # 基因组参数
-    parser.add_argument("-ref", nargs='+', required=True, help="参考基因组条目：名称，或 名称 FASTA GFF")
+    parser.add_argument("-ref", nargs='+', help="参考基因组条目：名称，或 名称 FASTA GFF；Gene ID/Location 必填")
     parser.add_argument("-qry", nargs='+', action='append', help="目标基因组条目，可重复：名称，或 名称 FASTA [GFF]")
     parser.add_argument("-ra", help="参考基因组注释文件（覆盖默认）")
     parser.add_argument("-ra-source", help="参考基因组注释版本（如 igv, ensembl_plants）")
@@ -1279,13 +1323,13 @@ def main():
         "-u", "--upstream",
         type=int,
         default=0,
-        help="上游延伸长度 bp（仅 Gene ID 模式有效，默认: 0）",
+        help="上游延伸长度 bp（Gene ID 为参考基因，Sequence 为查询命中片段，默认: 0）",
     )
     parser.add_argument(
         "-d", "--downstream",
         type=int,
         default=0,
-        help="下游延伸长度 bp（仅 Gene ID 模式有效，默认: 0）",
+        help="下游延伸长度 bp（Gene ID 为参考基因，Sequence 为查询命中片段，默认: 0）",
     )
 
     # 输出
@@ -1306,22 +1350,24 @@ def main():
 
     # 获取基因组路径（支持注释版本选择）
     ra_source = getattr(args, 'ra_source', None)
-    ref_entry_raw = _parse_ref_entry(args.ref)
-    ref_entry = _resolve_genome_entry(ref_entry_raw, annotation_source=ra_source, role="参考基因组")
-    ref_genome = ref_entry.fasta
-    ref_annotation = ref_entry.annotation
-    ref_name = ref_entry.name
-
-    if args.ra:
-        ref_annotation = args.ra
-
     query_entries = _parse_query_entries(args.qry)
+    ref_entry = None
+    ref_genome = None
+    ref_annotation = None
+    ref_name = ""
+    if args.ref:
+        ref_entry_raw = _parse_ref_entry(args.ref)
+        ref_entry = _resolve_genome_entry(ref_entry_raw, annotation_source=ra_source, role="参考基因组")
+        ref_genome = ref_entry.fasta
+        ref_annotation = ref_entry.annotation
+        ref_name = ref_entry.name
+        if args.ra:
+            ref_annotation = args.ra
+    elif args.gid or args.loc:
+        raise ValueError("Gene ID/Location 模式需要指定 -ref 参考基因组")
 
     # 根据模式处理
     if args.seq:
-        # 提示 -u/-d 在 Sequence 模式下无效
-        if args.upstream > 0 or args.downstream > 0:
-            print(f"[WARNING] -u/-d 参数仅在 Gene ID 模式下有效，当前 Sequence 模式将忽略这些参数")
         sequence_target = ref_entry
         resolved_queries = None
         if query_entries:
@@ -1330,11 +1376,15 @@ def main():
                 for entry in query_entries
             ]
             sequence_target = resolved_queries[0]
+        if not sequence_target:
+            raise ValueError("Sequence 模式需要指定 -qry 查询基因组")
         processor = SequenceProcessor(
             sequence_target.fasta, args.output, sequence_target.name, args.identity,
             ref_gff=sequence_target.annotation,
             min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
             query_entries=resolved_queries,
+            upstream=args.upstream,
+            downstream=args.downstream,
             candidate_limit=args.candidate_limit,
             pairwise_all=args.pairwise_all
         )

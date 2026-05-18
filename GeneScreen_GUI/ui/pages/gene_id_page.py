@@ -4,11 +4,11 @@ GeneScreen 1.0 - Gene ID 模式页面
 输入基因 ID，从参考基因组提取序列并与目标基因组比对
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTextEdit, QGroupBox, QFormLayout,
+    QWidget, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QTextEdit, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
     QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem,
-    QCheckBox, QSizePolicy
+    QCheckBox
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -19,6 +19,7 @@ import os
 import re
 
 from ui.widgets.genome_selector import GenomePairSelector
+from ui.widgets.analysis_layout import create_card, create_scroll_content
 from core import GeneIDProcessor, get_database, get_genome_manager
 from ui.widgets.report_worker import ReportWorker
 from core.gene_id_utils import load_gene_ids
@@ -164,9 +165,7 @@ class GeneIDPage(QWidget):
     
     def _init_ui(self):
         """初始化 UI"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout = create_scroll_content(self)
         
         # 标题
         title = QLabel("Gene ID 模式")
@@ -177,24 +176,18 @@ class GeneIDPage(QWidget):
         desc.setProperty("role", "pageDesc")
         layout.addWidget(desc)
         
-        # 基因组选择
-        genome_group = QGroupBox("基因组选择")
-        genome_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        genome_layout = QVBoxLayout(genome_group)
-        genome_layout.setContentsMargins(14, 24, 14, 14)
-        genome_layout.setSpacing(0)
         self.genome_selector = GenomePairSelector(show_manage_btn=False, show_ref_annotation=True,
                                                    multi_query=True,
-                                                   ref_annotation_label="参考注释版本")
+                                                   ref_annotation_label="参考注释版本",
+                                                   use_cards=True,
+                                                   ref_title="参考",
+                                                   query_title="查询")
         self.genome_selector.ref_changed.connect(self._on_ref_genome_changed)
         self.genome_selector.ref_annotation_changed.connect(self._on_ref_annotation_changed)
-        genome_layout.addWidget(self.genome_selector)
-        genome_group.setMinimumHeight(self.genome_selector.recommended_group_min_height())
-        layout.addWidget(genome_group)
+        layout.addWidget(self.genome_selector)
         
         # 输入区域
-        input_group = QGroupBox("输入")
-        input_layout = QVBoxLayout(input_group)
+        input_group, input_layout = create_card("Gene ID")
         
         # Gene ID 输入（用 QLineEdit + 独立弹窗列表）
         id_layout = QHBoxLayout()
@@ -243,16 +236,15 @@ class GeneIDPage(QWidget):
         
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("每行一个 ID")
-        self.batch_input.setMaximumHeight(100)
+        self.batch_input.setMinimumHeight(110)
         self.batch_input.textChanged.connect(self._on_batch_gene_ids_changed)
         input_layout.addWidget(self.batch_input)
         
         layout.addWidget(input_group)
         
         # 参数设置
-        param_group = QGroupBox("参数设置")
+        param_group, param_layout = create_card("参数设置", QFormLayout)
         param_group.setObjectName("paramGroup")
-        param_layout = QFormLayout(param_group)
         param_layout.setLabelAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         
         spin_height = 30

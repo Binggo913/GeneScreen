@@ -4,10 +4,10 @@ GeneScreen 1.0 - Sequence 模式页面
 输入序列，与参考基因组进行比对
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextEdit, QGroupBox, QFormLayout,
+    QWidget, QHBoxLayout, QLabel,
+    QPushButton, QTextEdit, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QAbstractSpinBox, QLineEdit, QCheckBox, QSizePolicy
+    QAbstractSpinBox, QLineEdit, QCheckBox
 )
 from PySide6.QtCore import QThread, Signal, Qt
 from datetime import datetime
@@ -15,6 +15,7 @@ import os
 import re
 
 from ui.widgets.genome_selector import GenomePairSelector
+from ui.widgets.analysis_layout import create_card, create_scroll_content
 from core import SequenceProcessor, get_database
 from ui.widgets.report_worker import ReportWorker
 from core.config import get_output_dir
@@ -83,33 +84,28 @@ class SequencePage(QWidget):
     
     def _init_ui(self):
         """初始化 UI"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout = create_scroll_content(self)
         
         # 标题
         title = QLabel("Sequence 模式")
         title.setProperty("role", "pageTitle")
         layout.addWidget(title)
         
-        desc = QLabel("输入序列，与参考基因组进行比对，检测 SNP 和 Indel 变异")
+        desc = QLabel("输入序列，与查询基因组进行比对，检测 SNP 和 Indel 变异")
         desc.setProperty("role", "pageDesc")
         layout.addWidget(desc)
         
-        # 基因组选择
-        genome_group = QGroupBox("基因组选择")
-        genome_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        genome_layout = QVBoxLayout(genome_group)
-        genome_layout.setContentsMargins(14, 24, 14, 14)
-        genome_layout.setSpacing(0)
-        self.genome_selector = GenomePairSelector(show_manage_btn=False, multi_query=True)
-        genome_layout.addWidget(self.genome_selector)
-        genome_group.setMinimumHeight(self.genome_selector.recommended_group_min_height())
-        layout.addWidget(genome_group)
+        self.genome_selector = GenomePairSelector(
+            show_manage_btn=False,
+            multi_query=True,
+            show_reference=False,
+            use_cards=True,
+            query_title="查询基因组"
+        )
+        layout.addWidget(self.genome_selector)
         
         # 输入区域
-        input_group = QGroupBox("输入序列")
-        input_layout = QVBoxLayout(input_group)
+        input_group, input_layout = create_card("Seq 序列")
         
         # 序列输入（支持多序列 FASTA）
         seq_label = QLabel("序列 (支持多序列 FASTA 格式):")
@@ -138,9 +134,8 @@ class SequencePage(QWidget):
         layout.addWidget(input_group)
         
         # 参数设置
-        param_group = QGroupBox("参数设置")
+        param_group, param_layout = create_card("参数设置", QFormLayout)
         param_group.setObjectName("paramGroup")
-        param_layout = QFormLayout(param_group)
         param_layout.setLabelAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         
         spin_height = 30
@@ -159,6 +154,20 @@ class SequencePage(QWidget):
         self.min_aln_len_input.setFixedHeight(spin_height)
         self.min_aln_len_input.setProperty("paramInput", True)
         self.min_aln_len_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+        self.upstream_input = QSpinBox()
+        self.upstream_input.setRange(0, 1000000)
+        self.upstream_input.setValue(0)
+        self.upstream_input.setFixedHeight(spin_height)
+        self.upstream_input.setProperty("paramInput", True)
+        self.upstream_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+        self.downstream_input = QSpinBox()
+        self.downstream_input.setRange(0, 1000000)
+        self.downstream_input.setValue(0)
+        self.downstream_input.setFixedHeight(spin_height)
+        self.downstream_input.setProperty("paramInput", True)
+        self.downstream_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
         self.candidate_limit_input = QSpinBox()
         self.candidate_limit_input.setRange(1, 1000)
@@ -182,6 +191,14 @@ class SequencePage(QWidget):
         row1.addSpacing(20)
         row1.addWidget(make_param_label("最小比对长度:"))
         row1.addWidget(self.min_aln_len_input)
+        row1.addWidget(make_param_label("bp"))
+        row1.addSpacing(20)
+        row1.addWidget(make_param_label("查询上游延伸:"))
+        row1.addWidget(self.upstream_input)
+        row1.addWidget(make_param_label("bp"))
+        row1.addSpacing(20)
+        row1.addWidget(make_param_label("查询下游延伸:"))
+        row1.addWidget(self.downstream_input)
         row1.addWidget(make_param_label("bp"))
         row1.addStretch()
         param_layout.addRow(row1)
@@ -322,13 +339,9 @@ class SequencePage(QWidget):
     def _run_analysis(self):
         """运行分析"""
         # 获取基因组
-        ref_genome = self.genome_selector.get_ref_genome()
         qry_genome = self.genome_selector.get_qry_genome()
         qry_genomes = self.genome_selector.get_qry_genomes()
         
-        if not ref_genome.get("fasta_path"):
-            QMessageBox.warning(self, "提示", "请选择参考基因组")
-            return
         if not qry_genome.get("fasta_path"):
             QMessageBox.warning(self, "提示", "请选择查询基因组")
             return
@@ -363,6 +376,8 @@ class SequencePage(QWidget):
         # 创建处理器
         identity = self.identity_input.value()
         min_aln_len = self.min_aln_len_input.value()
+        upstream = self.upstream_input.value()
+        downstream = self.downstream_input.value()
         candidate_limit = self.candidate_limit_input.value()
         pairwise_all = self.pairwise_all_input.isChecked()
         db = get_database()
@@ -378,7 +393,7 @@ class SequencePage(QWidget):
             os.makedirs(item_output_dir, exist_ok=True)
             history_id = db.add_history(
                 mode="sequence",
-                ref_genome_id=ref_genome.get("id"),
+                ref_genome_id=None,
                 qry_genome_id=qry_genome.get("id"),
                 input_value=seq_id,
                 identity=identity,
@@ -396,6 +411,8 @@ class SequencePage(QWidget):
             ref_gff=qry_genome.get("annotation_path"),
             min_aln_len=min_aln_len,
             query_genomes=qry_genomes,
+            upstream=upstream,
+            downstream=downstream,
             candidate_limit=candidate_limit,
             pairwise_all=pairwise_all
         )

@@ -4,10 +4,10 @@ GeneScreen 1.0 - Location 模式页面
 输入染色体坐标，提取指定区域并与目标基因组比对
 """
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QTextEdit, QGroupBox, QFormLayout,
+    QWidget, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QTextEdit, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QAbstractSpinBox, QCheckBox, QSizePolicy
+    QAbstractSpinBox, QCheckBox
 )
 from PySide6.QtCore import QThread, Signal, Qt
 from datetime import datetime
@@ -15,6 +15,7 @@ import os
 import re
 
 from ui.widgets.genome_selector import GenomePairSelector
+from ui.widgets.analysis_layout import create_card, create_scroll_content
 from core import LocationProcessor, get_genome_manager, get_database
 from ui.widgets.report_worker import ReportWorker
 from core.config import get_output_dir
@@ -86,9 +87,7 @@ class LocationPage(QWidget):
     
     def _init_ui(self):
         """初始化 UI"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
+        layout = create_scroll_content(self)
         
         # 标题
         title = QLabel("Location 模式")
@@ -99,20 +98,17 @@ class LocationPage(QWidget):
         desc.setProperty("role", "pageDesc")
         layout.addWidget(desc)
         
-        # 基因组选择
-        genome_group = QGroupBox("基因组选择")
-        genome_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        genome_layout = QVBoxLayout(genome_group)
-        genome_layout.setContentsMargins(14, 24, 14, 14)
-        genome_layout.setSpacing(0)
-        self.genome_selector = GenomePairSelector(show_manage_btn=False, multi_query=True)
-        genome_layout.addWidget(self.genome_selector)
-        genome_group.setMinimumHeight(self.genome_selector.recommended_group_min_height())
-        layout.addWidget(genome_group)
+        self.genome_selector = GenomePairSelector(
+            show_manage_btn=False,
+            multi_query=True,
+            use_cards=True,
+            ref_title="参考",
+            query_title="查询"
+        )
+        layout.addWidget(self.genome_selector)
         
         # 输入区域
-        input_group = QGroupBox("输入")
-        input_layout = QVBoxLayout(input_group)
+        input_group, input_layout = create_card("参考上的位置")
         
         # 位置输入说明
         loc_label = QLabel("输入位置 (每行一个，格式: Chr1:1000000-1050000):")
@@ -122,15 +118,14 @@ class LocationPage(QWidget):
         # 批量输入
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("Chr1:1000000-1050000\nChr2:2000000-2100000\n...")
-        self.batch_input.setMinimumHeight(100)
+        self.batch_input.setMinimumHeight(120)
         input_layout.addWidget(self.batch_input)
         
         layout.addWidget(input_group)
         
         # 参数设置
-        param_group = QGroupBox("参数设置")
+        param_group, param_layout = create_card("参数设置", QFormLayout)
         param_group.setObjectName("paramGroup")
-        param_layout = QFormLayout(param_group)
         param_layout.setLabelAlignment(Qt.AlignVCenter | Qt.AlignLeft)
         
         spin_height = 30

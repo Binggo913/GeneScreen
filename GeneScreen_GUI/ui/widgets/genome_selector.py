@@ -5,12 +5,14 @@ GeneScreen 1.0 - 基因组选择器组件
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QLabel, QPushButton, QFrame, QMessageBox, QListWidget, QListWidgetItem,
+    QLabel, QPushButton, QMessageBox, QListWidget, QListWidgetItem,
     QSizePolicy
 )
-from PySide6.QtCore import Signal, Qt, QSize
+from PySide6.QtCore import Signal, Qt
 
 from core import get_genome_manager, get_database
+
+from .analysis_layout import create_card
 
 
 class GenomeSelector(QWidget):
@@ -244,10 +246,9 @@ class GenomeSelector(QWidget):
 
 class GenomePairSelector(QWidget):
     """基因组对选择器（参考 + 查询）"""
-
-    MULTI_QUERY_MIN_HEIGHT = 260
-    MULTI_QUERY_WITH_REF_ANNOTATION_MIN_HEIGHT = 310
-    GROUP_BOX_VERTICAL_ALLOWANCE = 54
+    QUERY_LIST_EMPTY_ROWS = 1
+    QUERY_LIST_ROW_HEIGHT = 36
+    QUERY_LIST_VERTICAL_PADDING = 18
     
     # 信号
     ref_changed = Signal(str, dict)
@@ -256,18 +257,27 @@ class GenomePairSelector(QWidget):
     
     def __init__(self, parent=None, show_manage_btn: bool = True, show_ref_annotation: bool = False,
                  multi_query: bool = False,
-                 ref_annotation_label: str = "注释版本"):
+                 ref_annotation_label: str = "注释版本",
+                 show_reference: bool = True,
+                 use_cards: bool = False,
+                 ref_title: str = "参考",
+                 query_title: str = "查询"):
         super().__init__(parent)
         self.show_manage_btn = show_manage_btn
         self.show_ref_annotation = show_ref_annotation
         self.multi_query = multi_query
         self.ref_annotation_label = ref_annotation_label
+        self.show_reference = show_reference
+        self.use_cards = use_cards
+        self.ref_title = ref_title
+        self.query_title = query_title
         self._syncing_selection = False
         self._last_ref_name = ""
         self._last_qry_name = ""
+        self.ref_selector = None
+        self.qry_selector = None
         self._init_ui()
         if self.multi_query:
-            self.setMinimumHeight(self._multi_query_min_height())
             self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     
     def _init_ui(self):
@@ -276,23 +286,34 @@ class GenomePairSelector(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(15)
         
-        # 参考基因组（可选显示注释版本）
-        self.ref_selector = GenomeSelector(
-            "参考基因组", 
-            show_manage_btn=self.show_manage_btn,
-            show_annotation=self.show_ref_annotation,
-            annotation_label=self.ref_annotation_label
-        )
-        self.ref_selector.genome_changed.connect(self._on_ref_changed)
-        if self.show_ref_annotation:
-            self.ref_selector.annotation_changed.connect(self._on_ref_annotation_changed)
-        layout.addWidget(self.ref_selector)
+        if self.show_reference:
+            ref_parent_layout = layout
+            if self.use_cards:
+                ref_card, ref_parent_layout = create_card(self.ref_title)
+                layout.addWidget(ref_card)
+
+            # 参考基因组（可选显示注释版本）
+            self.ref_selector = GenomeSelector(
+                "参考基因组",
+                show_manage_btn=self.show_manage_btn,
+                show_annotation=self.show_ref_annotation,
+                annotation_label=self.ref_annotation_label
+            )
+            self.ref_selector.genome_changed.connect(self._on_ref_changed)
+            if self.show_ref_annotation:
+                self.ref_selector.annotation_changed.connect(self._on_ref_annotation_changed)
+            ref_parent_layout.addWidget(self.ref_selector)
         
         # 查询基因组
+        query_parent_layout = layout
+        if self.use_cards:
+            query_card, query_parent_layout = create_card(self.query_title)
+            layout.addWidget(query_card)
+
         self.qry_selector = GenomeSelector("查询基因组", show_manage_btn=False)
         self.qry_selector.genome_changed.connect(self._on_qry_changed)
         if not self.multi_query:
-            layout.addWidget(self.qry_selector)
+            query_parent_layout.addWidget(self.qry_selector)
         else:
             query_box = QVBoxLayout()
             query_box.setContentsMargins(0, 0, 0, 0)
@@ -324,38 +345,26 @@ class GenomePairSelector(QWidget):
             query_box.addLayout(action_layout)
 
             self.qry_list = QListWidget()
-            self.qry_list.setFixedHeight(86)
-            self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             self.qry_list.setAlternatingRowColors(True)
             query_box.addWidget(self.qry_list)
+            self._sync_qry_list_height()
 
-            layout.addLayout(query_box)
+            query_parent_layout.addLayout(query_box)
 
-    def _multi_query_min_height(self) -> int:
-        if self.show_ref_annotation:
-            return self.MULTI_QUERY_WITH_REF_ANNOTATION_MIN_HEIGHT
-        return self.MULTI_QUERY_MIN_HEIGHT
-
-    def recommended_group_min_height(self) -> int:
-        """Minimum QGroupBox height needed to avoid clipping this selector."""
-        if not self.multi_query:
-            return self.sizeHint().height() + self.GROUP_BOX_VERTICAL_ALLOWANCE
-        return self._multi_query_min_height() + self.GROUP_BOX_VERTICAL_ALLOWANCE
-
-    def sizeHint(self) -> QSize:
-        hint = super().sizeHint()
-        if self.multi_query:
-            hint.setHeight(max(hint.height(), self._multi_query_min_height()))
-        return hint
-
-    def minimumSizeHint(self) -> QSize:
-        hint = super().minimumSizeHint()
-        if self.multi_query:
-            hint.setHeight(max(hint.height(), self._multi_query_min_height()))
-        return hint
+    def _sync_qry_list_height(self):
+        if not self.multi_query or not hasattr(self, "qry_list"):
+            return
+        rows = max(self.QUERY_LIST_EMPTY_ROWS, self.qry_list.count())
+        height = rows * self.QUERY_LIST_ROW_HEIGHT + self.QUERY_LIST_VERTICAL_PADDING
+        self.qry_list.setMinimumHeight(height)
+        self.qry_list.updateGeometry()
+        self.updateGeometry()
     
     def get_ref_genome(self) -> dict:
         """获取参考基因组"""
+        if not self.ref_selector:
+            return {}
         return self.ref_selector.get_selected_genome()
     
     def get_qry_genome(self) -> dict:
@@ -383,21 +392,27 @@ class GenomePairSelector(QWidget):
     
     def get_ref_annotation(self) -> dict:
         """获取参考基因组的注释版本"""
+        if not self.ref_selector:
+            return {}
         return self.ref_selector.get_selected_annotation()
     
     def ref_has_annotation(self) -> bool:
         """参考基因组是否有注释"""
+        if not self.ref_selector:
+            return False
         return self.ref_selector.has_annotation()
     
     def refresh(self):
         """刷新列表"""
-        self.ref_selector.refresh()
-        self.qry_selector.refresh()
+        if self.ref_selector:
+            self.ref_selector.refresh()
+        if self.qry_selector:
+            self.qry_selector.refresh()
 
     def _on_ref_changed(self, name: str, genome: dict):
         if self._syncing_selection:
             return
-        qry_name = self.qry_selector.get_selected_name()
+        qry_name = self.qry_selector.get_selected_name() if self.qry_selector else ""
         if name and name == qry_name:
             QMessageBox.warning(self, "提示", "参考基因组和查询基因组不能相同")
             self._syncing_selection = True
@@ -418,7 +433,7 @@ class GenomePairSelector(QWidget):
     def _on_qry_changed(self, name: str, genome: dict):
         if self._syncing_selection:
             return
-        ref_name = self.ref_selector.get_selected_name()
+        ref_name = self.ref_selector.get_selected_name() if self.ref_selector else ""
         if name and name == ref_name:
             QMessageBox.warning(self, "提示", "参考基因组和查询基因组不能相同")
             self._syncing_selection = True
@@ -440,7 +455,7 @@ class GenomePairSelector(QWidget):
         if not name:
             QMessageBox.warning(self, "提示", "请选择要添加的查询基因组")
             return
-        ref_name = self.ref_selector.get_selected_name()
+        ref_name = self.ref_selector.get_selected_name() if self.ref_selector else ""
         if name == ref_name:
             QMessageBox.warning(self, "提示", "参考基因组和查询基因组不能相同")
             return
@@ -455,6 +470,7 @@ class GenomePairSelector(QWidget):
         item = QListWidgetItem(f"{display_name} ({annotation_state})")
         item.setData(Qt.UserRole, genome)
         self.qry_list.addItem(item)
+        self._sync_qry_list_height()
         self._last_qry_name = name
         self.qry_changed.emit(name, genome)
 
@@ -465,6 +481,7 @@ class GenomePairSelector(QWidget):
         if row < 0:
             return
         self.qry_list.takeItem(row)
+        self._sync_qry_list_height()
         genomes = self.get_qry_genomes()
         if genomes:
             self.qry_changed.emit(genomes[0].get("name", ""), genomes[0])
