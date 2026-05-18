@@ -102,7 +102,7 @@ class LocationPage(QWidget):
         # 基因组选择
         genome_group = QGroupBox("基因组选择")
         genome_layout = QVBoxLayout(genome_group)
-        self.genome_selector = GenomePairSelector(show_manage_btn=False)
+        self.genome_selector = GenomePairSelector(show_manage_btn=False, multi_query=True)
         genome_layout.addWidget(self.genome_selector)
         layout.addWidget(genome_group)
         

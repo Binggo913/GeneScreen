@@ -180,6 +180,7 @@ class GeneIDPage(QWidget):
         genome_group = QGroupBox("基因组选择")
         genome_layout = QVBoxLayout(genome_group)
         self.genome_selector = GenomePairSelector(show_manage_btn=False, show_ref_annotation=True,
+                                                   multi_query=True,
                                                    ref_annotation_label="参考注释版本")
         self.genome_selector.ref_changed.connect(self._on_ref_genome_changed)
         self.genome_selector.ref_annotation_changed.connect(self._on_ref_annotation_changed)

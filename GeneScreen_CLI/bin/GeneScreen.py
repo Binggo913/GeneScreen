@@ -14,6 +14,7 @@ import os
 import subprocess
 import argparse
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from pyfaidx import Fasta
@@ -25,6 +26,54 @@ from GenomeManager import GenomeManager
 
 # 全局基因组管理器
 genome_manager = GenomeManager()
+
+
+@dataclass
+class GenomeEntry:
+    name: str
+    fasta: str
+    annotation: str = None
+    source: str = "preloaded"
+
+
+def _parse_ref_entry(values):
+    if not values:
+        raise ValueError("-ref 需要指定参考基因组")
+    if len(values) == 1:
+        return {"name": values[0], "fasta": None, "annotation": None, "source": "preloaded"}
+    if len(values) == 3:
+        return {"name": values[0], "fasta": values[1], "annotation": values[2], "source": "explicit"}
+    raise ValueError("-ref 支持 1 个值（入库名称）或 3 个值（名称 FASTA GFF）")
+
+
+def _parse_query_entries(entries):
+    parsed = []
+    for values in entries or []:
+        if len(values) == 1:
+            parsed.append({"name": values[0], "fasta": None, "annotation": None, "source": "preloaded"})
+        elif len(values) in (2, 3):
+            parsed.append({
+                "name": values[0],
+                "fasta": values[1],
+                "annotation": values[2] if len(values) == 3 else None,
+                "source": "explicit",
+            })
+        else:
+            raise ValueError("-qry 支持 1 个值（入库名称）、2 个值（名称 FASTA）或 3 个值（名称 FASTA GFF）")
+    return parsed
+
+
+def _resolve_genome_entry(entry, annotation_source=None, require_annotation=False, role="基因组"):
+    if entry["source"] == "explicit":
+        fasta = entry["fasta"]
+        annotation = entry.get("annotation")
+    else:
+        fasta, annotation = genome_manager.get(entry["name"], annotation_source=annotation_source)
+    if not fasta:
+        raise ValueError(f"{role} '{entry['name']}' 不可用")
+    if require_annotation and not annotation:
+        raise ValueError(f"{role} '{entry['name']}' 需要注释文件")
+    return GenomeEntry(entry["name"], fasta, annotation, entry["source"])
 
 
 # ======================= 工具函数 =======================
@@ -964,6 +1013,10 @@ def main():
   # Gene ID 模式 + 上下游延伸（上游 2kb，下游 1kb）
   python GeneScreen.py -ref Nippon -qry ZS97 -gid LOC_Os06g10990 -u 2000 -d 1000 -o output/
 
+  # Gene ID 模式 + 多查询基因组（已入库 / 混合显式路径）
+  python GeneScreen.py -ref Nippon -qry ZS97 -qry MH63 -gid LOC_Os06g10990 -o output/
+  python GeneScreen.py -ref Nippon -qry q1 q1.fa q1.gff3 -qry q2 q2.fa -gid LOC_Os06g10990 -o output/
+
   # Location 模式（单个）
   python GeneScreen.py -ref Nippon -qry ZS97 -loc Chr1:1000-2000 -o output/
 
@@ -979,8 +1032,8 @@ def main():
     )
 
     # 基因组参数
-    parser.add_argument("-ref", required=True, help="参考基因组（内置名称或路径）")
-    parser.add_argument("-qry", help="目标基因组（Gene ID/Location 模式必需）")
+    parser.add_argument("-ref", nargs='+', required=True, help="参考基因组条目：名称，或 名称 FASTA GFF")
+    parser.add_argument("-qry", nargs='+', action='append', help="目标基因组条目，可重复：名称，或 名称 FASTA [GFF]")
     parser.add_argument("-ra", help="参考基因组注释文件（覆盖默认）")
     parser.add_argument("-ra-source", help="参考基因组注释版本（如 igv, ensembl_plants）")
 
@@ -1042,41 +1095,60 @@ def main():
 
     # 获取基因组路径（支持注释版本选择）
     ra_source = getattr(args, 'ra_source', None)
-    ref_genome, ref_annotation = genome_manager.get(args.ref, annotation_source=ra_source)
-    if not ref_genome:
-        print(f"\n基因组 '{args.ref}' 不可用。")
-        print("可以使用以下命令管理基因组:")
-        print(f"  python GenomeManager.py search {args.ref}")
-        print(f"  python GenomeManager.py download <id>")
-        print(f"  python GenomeManager.py add <name> <fasta>")
-        return
+    ref_entry_raw = _parse_ref_entry(args.ref)
+    ref_entry = _resolve_genome_entry(ref_entry_raw, annotation_source=ra_source, role="参考基因组")
+    ref_genome = ref_entry.fasta
+    ref_annotation = ref_entry.annotation
+    ref_name = ref_entry.name
 
     if args.ra:
         ref_annotation = args.ra
+
+    query_entries = _parse_query_entries(args.qry)
 
     # 根据模式处理
     if args.seq:
         # 提示 -u/-d 在 Sequence 模式下无效
         if args.upstream > 0 or args.downstream > 0:
             print(f"[WARNING] -u/-d 参数仅在 Gene ID 模式下有效，当前 Sequence 模式将忽略这些参数")
-        processor = SequenceProcessor(ref_genome, args.output, args.ref, args.identity, ref_gff=ref_annotation, 
-                                       min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
+        sequence_target = ref_entry
+        if query_entries:
+            resolved_queries = [
+                _resolve_genome_entry(entry, role="目标基因组")
+                for entry in query_entries
+            ]
+            if len(resolved_queries) > 1:
+                print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
+            sequence_target = resolved_queries[0]
+        processor = SequenceProcessor(
+            sequence_target.fasta, args.output, sequence_target.name, args.identity,
+            ref_gff=sequence_target.annotation,
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+        )
         processor.process(args.seq)
 
     elif args.gid:
-        if not args.qry:
+        if not query_entries:
             raise ValueError("Gene ID 模式需要指定 -qry 目标基因组")
         if not ref_annotation:
             raise ValueError("Gene ID 模式需要参考基因组注释文件")
 
-        qry_genome, qry_annotation = genome_manager.get(args.qry)
-        if not qry_genome:
-            print(f"[ERROR] 目标基因组 '{args.qry}' 不可用")
-            return
+        resolved_queries = [
+            _resolve_genome_entry(entry, role="目标基因组")
+            for entry in query_entries
+        ]
+        if len(resolved_queries) > 1:
+            print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
+        query_entry = resolved_queries[0]
+        qry_genome = query_entry.fasta
+        qry_annotation = query_entry.annotation
+        qry_name = query_entry.name
 
-        processor = GeneIDProcessor(ref_genome, ref_annotation, qry_genome, args.output, args.ref, args.qry, args.identity, 
-                                     qry_gff=qry_annotation, upstream=args.upstream, downstream=args.downstream,
-                                     min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
+        processor = GeneIDProcessor(
+            ref_genome, ref_annotation, qry_genome, args.output, ref_name, qry_name, args.identity,
+            qry_gff=qry_annotation, upstream=args.upstream, downstream=args.downstream,
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+        )
 
         # 判断是文件还是 Gene ID 列表
         gene_ids = []
@@ -1097,21 +1169,29 @@ def main():
             processor.process(gene_id)
 
     elif args.loc:
-        if not args.qry:
+        if not query_entries:
             raise ValueError("Location 模式需要指定 -qry 目标基因组")
 
         # 提示 -u/-d 在 Location 模式下无效
         if args.upstream > 0 or args.downstream > 0:
             print(f"[WARNING] -u/-d 参数仅在 Gene ID 模式下有效，当前 Location 模式将忽略这些参数")
 
-        qry_genome, qry_annotation = genome_manager.get(args.qry)
-        if not qry_genome:
-            print(f"[ERROR] 目标基因组 '{args.qry}' 不可用")
-            return
+        resolved_queries = [
+            _resolve_genome_entry(entry, role="目标基因组")
+            for entry in query_entries
+        ]
+        if len(resolved_queries) > 1:
+            print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
+        query_entry = resolved_queries[0]
+        qry_genome = query_entry.fasta
+        qry_annotation = query_entry.annotation
+        qry_name = query_entry.name
 
-        processor = LocationProcessor(ref_genome, qry_genome, args.output, args.ref, args.qry, args.identity, 
-                                        ref_gff=ref_annotation, qry_gff=qry_annotation,
-                                        min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
+        processor = LocationProcessor(
+            ref_genome, qry_genome, args.output, ref_name, qry_name, args.identity,
+            ref_gff=ref_annotation, qry_gff=qry_annotation,
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+        )
 
         # 判断是文件还是区域字符串列表
         locations = []

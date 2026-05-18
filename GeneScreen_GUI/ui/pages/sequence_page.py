@@ -14,7 +14,7 @@ from datetime import datetime
 import os
 import re
 
-from ui.widgets.genome_selector import GenomeSelector
+from ui.widgets.genome_selector import GenomePairSelector
 from core import SequenceProcessor, get_database
 from ui.widgets.report_worker import ReportWorker
 from core.config import get_output_dir
@@ -96,10 +96,10 @@ class SequencePage(QWidget):
         desc.setProperty("role", "pageDesc")
         layout.addWidget(desc)
         
-        # 基因组选择（只需要参考基因组）
-        genome_group = QGroupBox("参考基因组")
+        # 基因组选择
+        genome_group = QGroupBox("基因组选择")
         genome_layout = QVBoxLayout(genome_group)
-        self.genome_selector = GenomeSelector("参考基因组", show_manage_btn=False)
+        self.genome_selector = GenomePairSelector(show_manage_btn=False, multi_query=True)
         genome_layout.addWidget(self.genome_selector)
         layout.addWidget(genome_group)
         
@@ -299,10 +299,14 @@ class SequencePage(QWidget):
     def _run_analysis(self):
         """运行分析"""
         # 获取基因组
-        ref_genome = self.genome_selector.get_selected_genome()
+        ref_genome = self.genome_selector.get_ref_genome()
+        qry_genome = self.genome_selector.get_qry_genome()
         
         if not ref_genome.get("fasta_path"):
             QMessageBox.warning(self, "提示", "请选择参考基因组")
+            return
+        if not qry_genome.get("fasta_path"):
+            QMessageBox.warning(self, "提示", "请选择查询基因组")
             return
         
         # 解析序列
@@ -349,7 +353,7 @@ class SequencePage(QWidget):
             history_id = db.add_history(
                 mode="sequence",
                 ref_genome_id=ref_genome.get("id"),
-                qry_genome_id=None,
+                qry_genome_id=qry_genome.get("id"),
                 input_value=seq_id,
                 identity=identity,
                 output_dir=item_output_dir,
@@ -359,11 +363,11 @@ class SequencePage(QWidget):
             self._output_dir_map[seq_id] = item_output_dir
 
         processor = SequenceProcessor(
-            ref_genome=ref_genome["fasta_path"],
+            ref_genome=qry_genome["fasta_path"],
             output_dir=output_dir,
-            ref_name=ref_genome.get("name", ""),
+            ref_name=qry_genome.get("name", ""),
             identity=identity,
-            ref_gff=ref_genome.get("annotation_path"),
+            ref_gff=qry_genome.get("annotation_path"),
             min_aln_len=min_aln_len
         )
         
@@ -392,7 +396,7 @@ class SequencePage(QWidget):
         db = get_database()
         if result:
             output_dir = self._output_dir_map.get(seq_id, "") or result.get("output_dir", "")
-            ref_name = self.genome_selector.get_selected_genome().get("name", "")
+            ref_name = self.genome_selector.get_qry_genome().get("name", "")
             job = {
                 "history_id": history_id,
                 "result": result,

@@ -5,7 +5,7 @@ GeneScreen 1.0 - 基因组选择器组件
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QLabel, QPushButton, QFrame, QMessageBox
+    QLabel, QPushButton, QFrame, QMessageBox, QListWidget, QListWidgetItem
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -250,10 +250,12 @@ class GenomePairSelector(QWidget):
     ref_annotation_changed = Signal(str, dict)  # 参考基因组注释版本改变
     
     def __init__(self, parent=None, show_manage_btn: bool = True, show_ref_annotation: bool = False,
+                 multi_query: bool = False,
                  ref_annotation_label: str = "注释版本"):
         super().__init__(parent)
         self.show_manage_btn = show_manage_btn
         self.show_ref_annotation = show_ref_annotation
+        self.multi_query = multi_query
         self.ref_annotation_label = ref_annotation_label
         self._syncing_selection = False
         self._last_ref_name = ""
@@ -281,7 +283,44 @@ class GenomePairSelector(QWidget):
         # 查询基因组
         self.qry_selector = GenomeSelector("查询基因组", show_manage_btn=False)
         self.qry_selector.genome_changed.connect(self._on_qry_changed)
-        layout.addWidget(self.qry_selector)
+        if not self.multi_query:
+            layout.addWidget(self.qry_selector)
+        else:
+            query_box = QVBoxLayout()
+            query_box.setContentsMargins(0, 0, 0, 0)
+            query_box.setSpacing(8)
+
+            add_layout = QHBoxLayout()
+            add_layout.setContentsMargins(0, 0, 0, 0)
+            add_layout.setSpacing(8)
+            add_layout.addWidget(self.qry_selector, 1)
+            self.add_qry_btn = QPushButton("添加")
+            self.add_qry_btn.setProperty("secondary", True)
+            self.add_qry_btn.setFixedWidth(70)
+            self.add_qry_btn.clicked.connect(self._add_current_query)
+            add_layout.addWidget(self.add_qry_btn)
+            query_box.addLayout(add_layout)
+
+            selected_label = QLabel("已选查询基因组")
+            selected_label.setProperty("role", "fieldLabel")
+            query_box.addWidget(selected_label)
+
+            self.qry_list = QListWidget()
+            self.qry_list.setMinimumHeight(72)
+            self.qry_list.setMaximumHeight(120)
+            self.qry_list.setAlternatingRowColors(True)
+            query_box.addWidget(self.qry_list)
+
+            remove_layout = QHBoxLayout()
+            remove_layout.addStretch()
+            self.remove_qry_btn = QPushButton("移除")
+            self.remove_qry_btn.setProperty("secondary", True)
+            self.remove_qry_btn.setFixedWidth(70)
+            self.remove_qry_btn.clicked.connect(self._remove_selected_query)
+            remove_layout.addWidget(self.remove_qry_btn)
+            query_box.addLayout(remove_layout)
+
+            layout.addLayout(query_box)
     
     def get_ref_genome(self) -> dict:
         """获取参考基因组"""
@@ -289,7 +328,26 @@ class GenomePairSelector(QWidget):
     
     def get_qry_genome(self) -> dict:
         """获取查询基因组"""
-        return self.qry_selector.get_selected_genome()
+        genomes = self.get_qry_genomes()
+        return genomes[0] if genomes else {}
+
+    def get_qry_genomes(self) -> list:
+        """获取查询基因组列表。未添加列表时兼容返回当前下拉选择。"""
+        if not self.multi_query:
+            genome = self.qry_selector.get_selected_genome()
+            return [genome] if genome else []
+        genomes = []
+        if hasattr(self, "qry_list"):
+            for index in range(self.qry_list.count()):
+                item = self.qry_list.item(index)
+                genome = item.data(Qt.UserRole) or {}
+                if genome:
+                    genomes.append(genome)
+        if not genomes:
+            genome = self.qry_selector.get_selected_genome()
+            if genome:
+                genomes.append(genome)
+        return genomes
     
     def get_ref_annotation(self) -> dict:
         """获取参考基因组的注释版本"""
@@ -341,3 +399,42 @@ class GenomePairSelector(QWidget):
             return
         self._last_qry_name = name
         self.qry_changed.emit(name, genome)
+
+    def _add_current_query(self):
+        if not self.multi_query:
+            return
+        genome = self.qry_selector.get_selected_genome()
+        name = genome.get("name", "")
+        if not name:
+            QMessageBox.warning(self, "提示", "请选择要添加的查询基因组")
+            return
+        ref_name = self.ref_selector.get_selected_name()
+        if name == ref_name:
+            QMessageBox.warning(self, "提示", "参考基因组和查询基因组不能相同")
+            return
+        for index in range(self.qry_list.count()):
+            item = self.qry_list.item(index)
+            existing = item.data(Qt.UserRole) or {}
+            if existing.get("name") == name:
+                QMessageBox.information(self, "提示", "该查询基因组已添加")
+                return
+        display_name = genome.get("display_name") or name
+        annotation_state = "有注释" if genome.get("annotation_path") else "无注释"
+        item = QListWidgetItem(f"{display_name} ({annotation_state})")
+        item.setData(Qt.UserRole, genome)
+        self.qry_list.addItem(item)
+        self._last_qry_name = name
+        self.qry_changed.emit(name, genome)
+
+    def _remove_selected_query(self):
+        if not self.multi_query or not hasattr(self, "qry_list"):
+            return
+        row = self.qry_list.currentRow()
+        if row < 0:
+            return
+        self.qry_list.takeItem(row)
+        genomes = self.get_qry_genomes()
+        if genomes:
+            self.qry_changed.emit(genomes[0].get("name", ""), genomes[0])
+        else:
+            self.qry_changed.emit("", {})

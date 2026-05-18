@@ -170,6 +170,11 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * Current reports now emit `report/data.json` and `report/index.html` while keeping legacy HTML and pair artifacts available.
   * GUI history sync prefers the new `report/index.html` path when present.
   * N=1 `data.json` now includes explicit render-ready `tracks`, `overview`, `detail.visible_links`, and `variants` sections.
+* Phase 2 input foundation:
+  * CLI parses `-ref` as either preloaded name or explicit `name FASTA GFF`.
+  * CLI parses repeated `-qry` entries as preloaded, explicit, or mixed query genome entries.
+  * GUI shared genome selector supports an add/remove query list while preserving single-query fallback behavior.
+  * Gene ID, Location, and Sequence pages use the shared multi-query-capable selector.
 
 ## Acceptance Criteria
 
