@@ -771,6 +771,14 @@ class MainWindow(QMainWindow):
         secondary_button_pressed = "#dde3ee"
         secondary_button_border = "#cfd6e4"
         secondary_button_text = "#2f80ff"
+        primary_button_bg = "#2f80ff"
+        primary_button_hover = "#1f72e8"
+        primary_button_pressed = "#195fc4"
+        primary_button_border = "#1f66d1"
+        primary_button_text = "#ffffff"
+        primary_button_disabled_bg = "#d6dde8"
+        primary_button_disabled_text = "#8c98aa"
+        primary_button_disabled_border = "#c5cfdd"
 
         if self._dark_mode:
             theme_bg = "#202124"
@@ -807,6 +815,14 @@ class MainWindow(QMainWindow):
             secondary_button_pressed = "#354052"
             secondary_button_border = "#3a4657"
             secondary_button_text = "#8ab4ff"
+            primary_button_bg = "#2f80ff"
+            primary_button_hover = "#4c94ff"
+            primary_button_pressed = "#1f66d1"
+            primary_button_border = "#5aa0ff"
+            primary_button_text = "#ffffff"
+            primary_button_disabled_bg = "#303844"
+            primary_button_disabled_text = "#7b8594"
+            primary_button_disabled_border = "#3d4654"
 
         if hasattr(self, "window_root"):
             self.window_root.set_theme(theme_bg, theme_border, radius=12)
@@ -1080,6 +1096,30 @@ class MainWindow(QMainWindow):
 
             QPushButton[secondary="true"]:pressed {{
                 background: {secondary_button_pressed};
+            }}
+
+            QPushButton[primaryAction="true"] {{
+                background: {primary_button_bg};
+                color: {primary_button_text};
+                border: 1px solid {primary_button_border};
+                border-radius: 8px;
+                font-weight: 600;
+            }}
+
+            QPushButton[primaryAction="true"]:hover {{
+                background: {primary_button_hover};
+                border-color: {primary_button_border};
+            }}
+
+            QPushButton[primaryAction="true"]:pressed {{
+                background: {primary_button_pressed};
+                border-color: {primary_button_border};
+            }}
+
+            QPushButton[primaryAction="true"]:disabled {{
+                background: {primary_button_disabled_bg};
+                color: {primary_button_disabled_text};
+                border-color: {primary_button_disabled_border};
             }}
 
             QComboBox QAbstractItemView {{

@@ -139,6 +139,30 @@ QPushButton[secondary="true"]:pressed {
     background: #dde3ee;
 }
 
+QPushButton[primaryAction="true"] {
+    background: #2f80ff;
+    color: white;
+    border: 1px solid #1f66d1;
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+QPushButton[primaryAction="true"]:hover {
+    background: #1f72e8;
+    border-color: #1859b8;
+}
+
+QPushButton[primaryAction="true"]:pressed {
+    background: #195fc4;
+    border-color: #144f9f;
+}
+
+QPushButton[primaryAction="true"]:disabled {
+    background: #d6dde8;
+    color: #8c98aa;
+    border-color: #c5cfdd;
+}
+
 /* ==================== 输入框样式 ==================== */
 
 QLineEdit, QTextEdit, QPlainTextEdit {

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
     QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem,
-    QCheckBox
+    QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -198,7 +198,7 @@ class GeneIDPage(QWidget):
         self.gene_id_input = QLineEdit()
         self.gene_id_input.setMinimumHeight(36)
         self.gene_id_input.setProperty("paramInput", True)
-        self.gene_id_input.setPlaceholderText("请选择或输入基因 ID")
+        self.gene_id_input.setPlaceholderText("请选择参考基因组的gene id")
         self.gene_id_input.textEdited.connect(self._on_gene_id_text_edited)
         self.gene_id_input.textChanged.connect(self._on_single_gene_id_changed)
         self.gene_id_input.installEventFilter(self)
@@ -212,7 +212,7 @@ class GeneIDPage(QWidget):
         self._popup_list.itemClicked.connect(self._on_popup_item_clicked)
         self._popup_list.hide()
         
-        self._set_gene_id_loading_state("请选择参考基因组")
+        self._set_gene_id_loading_state("请选择参考基因组的gene id")
         
         # 批量输入
         input_layout.addSpacing(10)
@@ -222,6 +222,12 @@ class GeneIDPage(QWidget):
         batch_label.setProperty("role", "muted")
         batch_header.addWidget(batch_label)
         batch_header.addStretch()
+
+        import_gene_ids_btn = QPushButton("从文件导入")
+        import_gene_ids_btn.setProperty("secondary", True)
+        import_gene_ids_btn.setFixedHeight(32)
+        import_gene_ids_btn.clicked.connect(self._import_gene_ids_from_file)
+        batch_header.addWidget(import_gene_ids_btn)
         
         # Gene list 路径显示（可点击打开）
         self.gene_list_path_label = QLabel("")
@@ -236,7 +242,9 @@ class GeneIDPage(QWidget):
         
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("每行一个 ID")
-        self.batch_input.setMinimumHeight(110)
+        self.batch_input.setMinimumHeight(self._batch_gene_id_input_height(2))
+        self.batch_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        self.batch_input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.batch_input.textChanged.connect(self._on_batch_gene_ids_changed)
         input_layout.addWidget(self.batch_input)
         
@@ -348,6 +356,7 @@ class GeneIDPage(QWidget):
         btn_layout.addStretch()
         
         self.run_btn = QPushButton("🚀 开始分析")
+        self.run_btn.setProperty("primaryAction", True)
         self.run_btn.setMinimumWidth(150)
         self.run_btn.setMinimumHeight(45)
         self.run_btn.clicked.connect(self._run_analysis)
@@ -366,12 +375,22 @@ class GeneIDPage(QWidget):
         
         layout.addStretch()
 
+    def _batch_gene_id_input_height(self, line_count: int) -> int:
+        return self.batch_input.fontMetrics().lineSpacing() * max(2, line_count) + 30
+
+    def _resize_batch_gene_id_input(self):
+        if not hasattr(self, "batch_input"):
+            return
+        line_count = self.batch_input.toPlainText().count("\n") + 1
+        self.batch_input.setMinimumHeight(self._batch_gene_id_input_height(line_count))
+        self.batch_input.updateGeometry()
+
     def _on_ref_genome_changed(self, name: str, genome: dict):
         """参考基因组改变时，等待注释版本选择"""
         self._stop_gene_id_poll()
         self._current_ref_name = name
         if not name:
-            self._set_gene_id_loading_state("请选择参考基因组", disable=False)
+            self._set_gene_id_loading_state("请选择参考基因组的gene id", disable=False)
             self._update_gene_list_path_label("")
             return
         # 注释版本会通过 _on_ref_annotation_changed 触发加载
@@ -462,7 +481,7 @@ class GeneIDPage(QWidget):
         self.gene_id_input.blockSignals(True)
         self.gene_id_input.clear()
         self.gene_id_input.blockSignals(False)
-        self.gene_id_input.setPlaceholderText("请选择或输入基因 ID")
+        self.gene_id_input.setPlaceholderText("请选择参考基因组的gene id")
         self._gene_id_all_ids = list(ids)
         self._gene_id_all_ids_lower = [gid.lower() for gid in self._gene_id_all_ids]
         self._gene_id_all_ids_set = set(self._gene_id_all_ids)
@@ -573,12 +592,16 @@ class GeneIDPage(QWidget):
             self.gene_id_input.setStyleSheet("border: 1px solid #e74c3c;")
 
     def _on_batch_gene_ids_changed(self):
+        self._resize_batch_gene_id_input()
         if self._syncing_inputs:
             return
         if self.batch_input.toPlainText().strip():
             self._clear_single_input()
             # 校验批量 gene id
             self._validate_batch_gene_ids()
+        else:
+            self.batch_input.setStyleSheet("")
+            self.batch_input.setToolTip("")
 
     def _clear_batch_input(self):
         if not self.batch_input.toPlainText().strip():
@@ -588,6 +611,7 @@ class GeneIDPage(QWidget):
         self.batch_input.clear()
         self.batch_input.blockSignals(False)
         self._syncing_inputs = False
+        self._resize_batch_gene_id_input()
         self.batch_input.setStyleSheet("")  # 清除校验样式
     
     def _validate_batch_gene_ids(self):
@@ -632,6 +656,27 @@ class GeneIDPage(QWidget):
             lines.append(second)
         lines.append("...")
         self.batch_input.setPlaceholderText("\n".join(lines))
+
+    def _import_gene_ids_from_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "选择 Gene ID 文件",
+            "",
+            "文本文件 (*.txt *.list *.tsv *.csv);;所有文件 (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8-sig") as handle:
+                gene_ids = [line.strip() for line in handle if line.strip()]
+        except Exception as exc:
+            QMessageBox.warning(self, "错误", f"读取 Gene ID 文件失败: {exc}")
+            return
+        if not gene_ids:
+            QMessageBox.warning(self, "提示", "文件中未读取到 Gene ID")
+            return
+        self.batch_input.setPlainText("\n".join(gene_ids))
+        self._resize_batch_gene_id_input()
 
     def _update_completer_matches(self, text: str):
         if text == self._last_filter_text:
