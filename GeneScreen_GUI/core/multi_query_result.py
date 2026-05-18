@@ -168,6 +168,37 @@ def parse_variant_stats(snps_file: Optional[str]) -> Dict[str, int]:
     return stats
 
 
+def parse_variants(snps_file: Optional[str]) -> List[Dict[str, Any]]:
+    variants: List[Dict[str, Any]] = []
+    if not snps_file or not os.path.exists(snps_file):
+        return variants
+    with open(snps_file, "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("[") or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 5:
+                continue
+            try:
+                query_genome_pos = int(parts[0])
+                ref_source_pos = int(parts[3])
+            except ValueError:
+                continue
+            variants.append(
+                {
+                    "query_genome_pos": query_genome_pos,
+                    "ref_source_pos": ref_source_pos,
+                    "ref": parts[1],
+                    "alt": parts[2],
+                    "type": parts[4].upper(),
+                    "query_chr": parts[5].split()[0] if len(parts) > 5 else "query",
+                    "ref_seq": parts[6].split()[0] if len(parts) > 6 else "ref",
+                }
+            )
+    return variants
+
+
 def write_pair_hl(snps_file: Optional[str], output_path: str) -> Optional[str]:
     """Write compatibility .hl markers using the current ref/query semantics."""
     ensure_dir(os.path.dirname(output_path))
@@ -244,6 +275,25 @@ def build_single_query_payload(
     ref_length = read_fasta_length(result.get("fasta"))
     candidates = parse_coords_candidates(result.get("coords"), ref_length)
     stats = parse_variant_stats(result.get("snps"))
+    variants = parse_variants(result.get("snps"))
+    selected_candidate = candidates[0] if candidates else None
+    visible_links = []
+    if selected_candidate:
+        for index, block in enumerate(selected_candidate.get("blocks", []), start=1):
+            visible_links.append(
+                {
+                    "link_id": f"{pair_id}_link_{index}",
+                    "pair_id": pair_id,
+                    "source_track_id": "ref",
+                    "target_track_id": query_safe,
+                    "ref_start": block["ref_start"],
+                    "ref_end": block["ref_end"],
+                    "query_start": block["query_start"],
+                    "query_end": block["query_end"],
+                    "identity": block["identity"],
+                    "strand": block["strand"],
+                }
+            )
 
     if mode == "sequence":
         query_fasta = genome_files.get("ref_fasta")
@@ -294,6 +344,27 @@ def build_single_query_payload(
                 }
             ],
         },
+        "tracks": [
+            {
+                "track_id": "ref",
+                "genome_id": "ref",
+                "name": ref_entry_name,
+                "role": "ref_source",
+                "sequence_id": result_id,
+                "length": ref_length,
+                "artifact_fasta": relpath(ref_fasta_copy, report_dir),
+                "artifact_gff": relpath(ref_gff_copy, report_dir),
+            },
+            {
+                "track_id": query_safe,
+                "genome_id": query_safe,
+                "name": query_entry_name,
+                "role": "query_genome",
+                "candidate_count": len(candidates),
+                "selected_candidate_id": selected_candidate["candidate_id"] if selected_candidate else None,
+                "has_annotation": bool(query_gff),
+            },
+        ],
         "pairs": [
             {
                 "pair_id": pair_id,
@@ -326,16 +397,38 @@ def build_single_query_payload(
         "default_selection": {
             "track_order": ["ref", query_safe],
             "selected_candidates": {
-                query_safe: candidates[0]["candidate_id"] if candidates else None,
+                query_safe: selected_candidate["candidate_id"] if selected_candidate else None,
             },
         },
+        "overview": {
+            "query_order": [query_safe],
+            "best_candidates": {
+                query_safe: selected_candidate["candidate_id"] if selected_candidate else None,
+            },
+            "candidate_ids": {
+                query_safe: [candidate["candidate_id"] for candidate in candidates],
+            },
+        },
+        "detail": {
+            "track_order": ["ref", query_safe],
+            "selected_candidates": {
+                query_safe: selected_candidate["candidate_id"] if selected_candidate else None,
+            },
+            "visible_pair_ids": [pair_id],
+            "visible_links": visible_links,
+            "variant_ids": [f"var_{index}" for index in range(1, len(variants) + 1)],
+        },
+        "variants": [
+            {"variant_id": f"var_{index}", "pair_id": pair_id, **variant}
+            for index, variant in enumerate(variants, start=1)
+        ],
         "statistics": {
             "genome_count": 2,
             "query_count": 1,
             "total_candidate_count": len(candidates),
             "per_query_candidate_counts": {query_safe: len(candidates)},
             "selected_combination": {
-                "link_count": len(candidates[0]["blocks"]) if candidates else 0,
+                "link_count": len(visible_links),
                 "variants": stats,
             },
         },

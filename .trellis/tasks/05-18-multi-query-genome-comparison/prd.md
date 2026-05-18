@@ -169,6 +169,7 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * Added shared N=1 report payload generation for current two-genome runs in CLI and GUI.
   * Current reports now emit `report/data.json` and `report/index.html` while keeping legacy HTML and pair artifacts available.
   * GUI history sync prefers the new `report/index.html` path when present.
+  * N=1 `data.json` now includes explicit render-ready `tracks`, `overview`, `detail.visible_links`, and `variants` sections.
 
 ## Acceptance Criteria
 
