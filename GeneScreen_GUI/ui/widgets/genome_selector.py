@@ -246,7 +246,6 @@ class GenomeSelector(QWidget):
 
 class GenomePairSelector(QWidget):
     """基因组对选择器（参考 + 查询）"""
-    QUERY_LIST_EMPTY_ROWS = 1
     QUERY_LIST_ROW_HEIGHT = 36
     QUERY_LIST_VERTICAL_PADDING = 18
     
@@ -320,13 +319,13 @@ class GenomePairSelector(QWidget):
             query_box.setSpacing(10)
             query_box.addWidget(self.qry_selector)
 
-            selected_label = QLabel("已选查询基因组")
-            selected_label.setProperty("role", "fieldLabel")
+            self.selected_qry_label = QLabel("已选查询基因组")
+            self.selected_qry_label.setProperty("role", "fieldLabel")
 
             action_layout = QHBoxLayout()
             action_layout.setContentsMargins(80, 0, 0, 0)
             action_layout.setSpacing(8)
-            action_layout.addWidget(selected_label)
+            action_layout.addWidget(self.selected_qry_label)
             action_layout.addStretch()
 
             self.add_qry_btn = QPushButton("添加")
@@ -348,16 +347,22 @@ class GenomePairSelector(QWidget):
             self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
             self.qry_list.setAlternatingRowColors(True)
             query_box.addWidget(self.qry_list)
-            self._sync_qry_list_height()
+            self._sync_selected_query_section()
 
             query_parent_layout.addLayout(query_box)
 
-    def _sync_qry_list_height(self):
+    def _sync_selected_query_section(self):
         if not self.multi_query or not hasattr(self, "qry_list"):
             return
-        rows = max(self.QUERY_LIST_EMPTY_ROWS, self.qry_list.count())
-        height = rows * self.QUERY_LIST_ROW_HEIGHT + self.QUERY_LIST_VERTICAL_PADDING
-        self.qry_list.setMinimumHeight(height)
+        rows = self.qry_list.count()
+        has_selection = rows > 0
+        self.selected_qry_label.setVisible(has_selection)
+        self.remove_qry_btn.setVisible(has_selection)
+        self.qry_list.setVisible(has_selection)
+        self.qry_list.setMinimumHeight(
+            rows * self.QUERY_LIST_ROW_HEIGHT + self.QUERY_LIST_VERTICAL_PADDING
+            if has_selection else 0
+        )
         self.qry_list.updateGeometry()
         self.updateGeometry()
     
@@ -470,7 +475,7 @@ class GenomePairSelector(QWidget):
         item = QListWidgetItem(f"{display_name} ({annotation_state})")
         item.setData(Qt.UserRole, genome)
         self.qry_list.addItem(item)
-        self._sync_qry_list_height()
+        self._sync_selected_query_section()
         self._last_qry_name = name
         self.qry_changed.emit(name, genome)
 
@@ -481,7 +486,7 @@ class GenomePairSelector(QWidget):
         if row < 0:
             return
         self.qry_list.takeItem(row)
-        self._sync_qry_list_height()
+        self._sync_selected_query_section()
         genomes = self.get_qry_genomes()
         if genomes:
             self.qry_changed.emit(genomes[0].get("name", ""), genomes[0])

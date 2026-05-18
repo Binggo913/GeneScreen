@@ -766,6 +766,11 @@ class MainWindow(QMainWindow):
         scrollbar_bg = "#f0f2f5"
         scrollbar_handle = "#c4c8cf"
         scrollbar_handle_hover = "#aeb4bd"
+        secondary_button_bg = "#f3f4f6"
+        secondary_button_hover = "#e9edf5"
+        secondary_button_pressed = "#dde3ee"
+        secondary_button_border = "#cfd6e4"
+        secondary_button_text = "#2f80ff"
 
         if self._dark_mode:
             theme_bg = "#202124"
@@ -797,6 +802,11 @@ class MainWindow(QMainWindow):
             scrollbar_bg = "#1b1f25"
             scrollbar_handle = "#3b4048"
             scrollbar_handle_hover = "#4b515b"
+            secondary_button_bg = "#242a32"
+            secondary_button_hover = "#2d3642"
+            secondary_button_pressed = "#354052"
+            secondary_button_border = "#3a4657"
+            secondary_button_text = "#8ab4ff"
 
         if hasattr(self, "window_root"):
             self.window_root.set_theme(theme_bg, theme_border, radius=12)
@@ -1055,6 +1065,21 @@ class MainWindow(QMainWindow):
 
             QLineEdit::placeholder {{
                 color: {input_placeholder};
+            }}
+
+            QPushButton[secondary="true"] {{
+                background: {secondary_button_bg};
+                color: {secondary_button_text};
+                border: 1px solid {secondary_button_border};
+            }}
+
+            QPushButton[secondary="true"]:hover {{
+                background: {secondary_button_hover};
+                border-color: {secondary_button_text};
+            }}
+
+            QPushButton[secondary="true"]:pressed {{
+                background: {secondary_button_pressed};
             }}
 
             QComboBox QAbstractItemView {{
