@@ -137,6 +137,8 @@ class LazyGeneIdModel(QAbstractListModel):
 
 class GeneIDPage(QWidget):
     """Gene ID 模式页面"""
+
+    REF_REQUIRED_PLACEHOLDER = "--请先选择参考基因组--"
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -163,6 +165,7 @@ class GeneIDPage(QWidget):
         self._report_worker = None
         self._active_report_job = None
         self._pending_finish_message = ""
+        self._current_ref_name = ""
         # 防抖定时器
         self._debounce_timer = None
         self._init_ui()
@@ -202,7 +205,7 @@ class GeneIDPage(QWidget):
         self.gene_id_input = QLineEdit()
         self.gene_id_input.setMinimumHeight(36)
         self.gene_id_input.setProperty("paramInput", True)
-        self.gene_id_input.setPlaceholderText("--请先选择参考基因组--")
+        self.gene_id_input.setPlaceholderText(self.REF_REQUIRED_PLACEHOLDER)
         self.gene_id_input.textEdited.connect(self._on_gene_id_text_edited)
         self.gene_id_input.textChanged.connect(self._on_single_gene_id_changed)
         self.gene_id_input.installEventFilter(self)
@@ -216,7 +219,7 @@ class GeneIDPage(QWidget):
         self._popup_list.itemClicked.connect(self._on_popup_item_clicked)
         self._popup_list.hide()
         
-        self._set_gene_id_loading_state("--请先选择参考基因组--")
+        self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER)
         
         # 批量输入
         input_layout.addSpacing(10)
@@ -393,7 +396,7 @@ class GeneIDPage(QWidget):
         self._stop_gene_id_poll()
         self._current_ref_name = name
         if not name:
-            self._set_gene_id_loading_state("--请先选择参考基因组--", disable=True)
+            self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER, disable=True)
             self._update_gene_list_path_label("")
             return
         # 注释版本会通过 _on_ref_annotation_changed 触发加载
@@ -401,6 +404,11 @@ class GeneIDPage(QWidget):
     def _on_ref_annotation_changed(self, source: str, ann: dict):
         """参考基因组注释版本改变时，加载对应的 gene id 列表"""
         self._stop_gene_id_poll()
+
+        if not self._current_ref_name:
+            self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER, disable=True)
+            self._update_gene_list_path_label("")
+            return
         
         if not source or not ann:
             self._set_gene_id_loading_state("该基因组无注释文件，无法使用 Gene ID 模式", disable=True)
