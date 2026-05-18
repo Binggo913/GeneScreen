@@ -239,6 +239,223 @@ def _mode_ref_query_names(mode: str, result: Dict[str, Any], ref_name: str, qry_
     return ref_name or "ref", qry_name or "query"
 
 
+def build_multi_query_payload(
+    result: Dict[str, Any],
+    output_dir: str,
+    mode: str,
+    ref_name: str = "",
+    qry_name: Optional[str] = "",
+    identity: float = 90,
+    min_aln_len: int = 100,
+    genome_files: Optional[Dict[str, Any]] = None,
+    legacy_report: Optional[str] = None,
+    extra_files: Optional[List[Tuple[str, Optional[str], str]]] = None,
+) -> Dict[str, Any]:
+    genome_files = genome_files or {}
+    extra_files = extra_files or []
+    query_results = result.get("query_results") or []
+    query_entries = result.get("queries") or genome_files.get("queries") or []
+    result_id = result.get("id", "input")
+    safe_id = sanitize_path_segment(result_id, "input")
+    ref_entry_name = result_id if mode == "sequence" else (ref_name or "ref")
+
+    ref_dir = ensure_dir(os.path.join(output_dir, "ref"))
+    report_dir = ensure_dir(os.path.join(output_dir, "report"))
+    ref_fasta_copy = copy_if_exists(result.get("fasta"), os.path.join(ref_dir, f"{safe_id}.fasta"))
+    ref_gff_copy = copy_if_exists(result.get("gff"), os.path.join(ref_dir, f"{safe_id}.gff3"))
+    ref_length = read_fasta_length(result.get("fasta"))
+
+    tracks = [{
+        "track_id": "ref",
+        "genome_id": "ref",
+        "name": ref_entry_name,
+        "role": "ref_source",
+        "sequence_id": result_id,
+        "length": ref_length,
+        "artifact_fasta": relpath(ref_fasta_copy, report_dir),
+        "artifact_gff": relpath(ref_gff_copy, report_dir),
+    }]
+    queries_payload = []
+    pairs = []
+    candidates_map = {}
+    variants_payload = []
+    visible_links = []
+    query_order = []
+    selected_candidates = {}
+    best_candidates = {}
+    per_query_candidate_counts = {}
+    total_candidate_count = 0
+    combined_variant_stats = {"SNP": 0, "INS": 0, "DEL": 0, "INDEL": 0, "total": 0}
+
+    def entry_for(index: int, query_result: Dict[str, Any]) -> Dict[str, Any]:
+        if index < len(query_entries):
+            return query_entries[index]
+        return {
+            "name": query_result.get("query_name") or f"query_{index + 1}",
+            "fasta": query_result.get("query_fasta"),
+            "gff": query_result.get("query_gff"),
+        }
+
+    for index, query_result in enumerate(query_results):
+        entry = entry_for(index, query_result)
+        query_name = entry.get("name") or query_result.get("query_name") or f"query_{index + 1}"
+        query_safe = sanitize_path_segment(query_name, f"query_{index + 1}")
+        pair_id = f"ref__{query_safe}"
+        query_dir = ensure_dir(os.path.join(output_dir, "queries", query_safe))
+        pair_prefix = os.path.join(query_dir, pair_id)
+
+        blast_copy = copy_if_exists(query_result.get("blast_xml"), f"{pair_prefix}.blast.xml")
+        coords_copy = copy_if_exists(query_result.get("coords"), f"{pair_prefix}.coords")
+        snps_copy = copy_if_exists(query_result.get("snps"), f"{pair_prefix}.snps")
+        hl_copy = write_pair_hl(query_result.get("snps"), f"{pair_prefix}.hl")
+        candidates = parse_coords_candidates(query_result.get("coords"), ref_length)
+        variants = parse_variants(query_result.get("snps"))
+        stats = parse_variant_stats(query_result.get("snps"))
+        selected_candidate = candidates[0] if candidates else None
+
+        query_order.append(query_safe)
+        selected_candidates[query_safe] = selected_candidate["candidate_id"] if selected_candidate else None
+        best_candidates[query_safe] = selected_candidate["candidate_id"] if selected_candidate else None
+        candidates_map[query_safe] = candidates
+        per_query_candidate_counts[query_safe] = len(candidates)
+        total_candidate_count += len(candidates)
+        for key in combined_variant_stats:
+            combined_variant_stats[key] += stats.get(key, 0)
+
+        queries_payload.append({
+            "genome_id": query_safe,
+            "name": query_name,
+            "role": "query_genome",
+            "source_fasta": entry.get("fasta") or query_result.get("query_fasta"),
+            "source_gff": entry.get("gff") or query_result.get("query_gff"),
+            "has_annotation": bool(entry.get("gff") or query_result.get("query_gff")),
+        })
+        tracks.append({
+            "track_id": query_safe,
+            "genome_id": query_safe,
+            "name": query_name,
+            "role": "query_genome",
+            "candidate_count": len(candidates),
+            "selected_candidate_id": selected_candidate["candidate_id"] if selected_candidate else None,
+            "has_annotation": bool(entry.get("gff") or query_result.get("query_gff")),
+        })
+        pairs.append({
+            "pair_id": pair_id,
+            "type": "ref_query",
+            "ref_genome_id": "ref",
+            "query_genome_id": query_safe,
+            "coords_semantics": {
+                "coords_ref_columns": "query genome BLAST subject",
+                "coords_query_columns": "ref-derived BLAST query sequence",
+                "variants_are_relative_to": "ref_source",
+            },
+            "artifacts": {
+                "blast_xml": relpath(blast_copy, report_dir),
+                "coords": relpath(coords_copy, report_dir),
+                "snps": relpath(snps_copy, report_dir),
+                "hl": relpath(hl_copy, report_dir),
+                "legacy_report": relpath(legacy_report, report_dir) if index == 0 else None,
+            },
+            "candidate_ids": [candidate["candidate_id"] for candidate in candidates],
+            "stats": {
+                "candidate_count": len(candidates),
+                "total_aln_len": sum(candidate["total_aln_len"] for candidate in candidates),
+                "variants": stats,
+            },
+        })
+        if selected_candidate:
+            for block_index, block in enumerate(selected_candidate.get("blocks", []), start=1):
+                visible_links.append({
+                    "link_id": f"{pair_id}_link_{block_index}",
+                    "pair_id": pair_id,
+                    "source_track_id": "ref",
+                    "target_track_id": query_safe,
+                    "ref_start": block["ref_start"],
+                    "ref_end": block["ref_end"],
+                    "query_start": block["query_start"],
+                    "query_end": block["query_end"],
+                    "identity": block["identity"],
+                    "strand": block["strand"],
+                })
+        for variant_index, variant in enumerate(variants, start=1):
+            variants_payload.append({
+                "variant_id": f"{pair_id}_var_{variant_index}",
+                "pair_id": pair_id,
+                **variant,
+            })
+
+    source_ref_fasta = genome_files.get("ref_fasta")
+    source_ref_gff = genome_files.get("ref_gff")
+    return {
+        "schema_version": "multi_query_report.v1",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "mode": mode,
+        "input": {
+            "id": result_id,
+            "safe_id": safe_id,
+            "location": result.get("location"),
+            "sequence_length": len(result.get("sequence", "")) if result.get("sequence") else ref_length,
+            "extraction_info": result.get("extraction_info"),
+        },
+        "parameters": {
+            "identity": identity,
+            "min_aln_len": min_aln_len,
+            "candidate_limit": 3,
+            "pairwise_all": False,
+        },
+        "genomes": {
+            "ref": {
+                "genome_id": "ref",
+                "name": ref_entry_name,
+                "role": "ref_source",
+                "source_fasta": source_ref_fasta,
+                "source_gff": source_ref_gff,
+                "artifact_fasta": relpath(ref_fasta_copy, report_dir),
+                "artifact_gff": relpath(ref_gff_copy, report_dir),
+            },
+            "queries": queries_payload,
+        },
+        "tracks": tracks,
+        "pairs": pairs,
+        "candidates": candidates_map,
+        "default_selection": {
+            "track_order": ["ref"] + query_order,
+            "selected_candidates": selected_candidates,
+        },
+        "overview": {
+            "query_order": query_order,
+            "best_candidates": best_candidates,
+            "candidate_ids": {
+                query_id: [candidate["candidate_id"] for candidate in candidates]
+                for query_id, candidates in candidates_map.items()
+            },
+        },
+        "detail": {
+            "track_order": ["ref"] + query_order,
+            "selected_candidates": selected_candidates,
+            "visible_pair_ids": [pair["pair_id"] for pair in pairs],
+            "visible_links": visible_links,
+            "variant_ids": [variant["variant_id"] for variant in variants_payload],
+        },
+        "variants": variants_payload,
+        "statistics": {
+            "genome_count": 1 + len(query_order),
+            "query_count": len(query_order),
+            "total_candidate_count": total_candidate_count,
+            "per_query_candidate_counts": per_query_candidate_counts,
+            "selected_combination": {
+                "link_count": len(visible_links),
+                "variants": combined_variant_stats,
+            },
+        },
+        "extra_files": [
+            {"label": label, "path": relpath(path, report_dir), "description": desc}
+            for label, path, desc in extra_files
+            if path
+        ],
+    }
+
+
 def build_single_query_payload(
     result: Dict[str, Any],
     output_dir: str,
@@ -251,6 +468,19 @@ def build_single_query_payload(
     legacy_report: Optional[str] = None,
     extra_files: Optional[List[Tuple[str, Optional[str], str]]] = None,
 ) -> Dict[str, Any]:
+    if len(result.get("query_results") or []) > 1:
+        return build_multi_query_payload(
+            result=result,
+            output_dir=output_dir,
+            mode=mode,
+            ref_name=ref_name,
+            qry_name=qry_name,
+            identity=identity,
+            min_aln_len=min_aln_len,
+            genome_files=genome_files,
+            legacy_report=legacy_report,
+            extra_files=extra_files,
+        )
     genome_files = genome_files or {}
     extra_files = extra_files or []
     result_id = result.get("id", "input")

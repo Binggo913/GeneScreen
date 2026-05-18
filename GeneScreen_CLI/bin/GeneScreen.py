@@ -103,6 +103,27 @@ def sanitize_path_segment(text):
     return re.sub(r'[<>:"/\\|?*]', "_", str(text)).strip()
 
 
+def normalize_query_entries(query_genome=None, qry_name="", qry_gff=None, query_entries=None):
+    normalized = []
+    if query_entries:
+        for index, entry in enumerate(query_entries, start=1):
+            if isinstance(entry, GenomeEntry):
+                normalized.append({
+                    "name": entry.name,
+                    "fasta": entry.fasta,
+                    "gff": entry.annotation,
+                })
+            else:
+                normalized.append({
+                    "name": entry.get("name") or f"query_{index}",
+                    "fasta": entry.get("fasta") or entry.get("fasta_path"),
+                    "gff": entry.get("annotation") or entry.get("annotation_path") or entry.get("gff"),
+                })
+    elif query_genome:
+        normalized.append({"name": qry_name or "query", "fasta": query_genome, "gff": qry_gff})
+    return [entry for entry in normalized if entry.get("fasta")]
+
+
 # ======================= 序列提取模块 =======================
 class SequenceExtractor:
     """使用 pyfaidx 从参考基因组提取序列"""
@@ -730,13 +751,14 @@ class BlastAligner:
 class GeneIDProcessor:
     """Gene ID 模式处理器"""
 
-    def __init__(self, ref_genome, ref_annotation, query_genome, output_dir, ref_name="", qry_name="", identity=90, qry_gff=None, upstream=0, downstream=0, min_aln_len=100, merge_gap=1000):
+    def __init__(self, ref_genome, ref_annotation, query_genome, output_dir, ref_name="", qry_name="", identity=90, qry_gff=None, upstream=0, downstream=0, min_aln_len=100, merge_gap=1000, query_entries=None):
         self.extractor = SequenceExtractor(ref_genome, ref_annotation, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.query_genome = query_genome
+        self.query_entries = normalize_query_entries(query_genome, qry_name, qry_gff, query_entries)
         self.output_dir = output_dir
         self.ref_name = ref_name
-        self.qry_name = qry_name
+        self.qry_name = self.query_entries[0]["name"] if self.query_entries else qry_name
         self.identity = identity
         self.upstream = upstream
         self.downstream = downstream
@@ -746,11 +768,36 @@ class GeneIDProcessor:
         self.genome_files = {
             'ref_fasta': ref_genome,
             'ref_gff': ref_annotation,
-            'qry_fasta': query_genome,
-            'qry_gff': qry_gff  # 查询基因组 GFF（用于提取比对区域的注释）
+            'qry_fasta': self.query_entries[0]["fasta"] if self.query_entries else query_genome,
+            'qry_gff': self.query_entries[0]["gff"] if self.query_entries else qry_gff,
+            'queries': self.query_entries,
         }
         # 查询基因组索引文件（用于宏观概览图）
         self.qry_index_file = f"{query_genome}.fai" if query_genome else None
+
+    def _align_queries(self, fasta_file, item_id):
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            aligned = self.aligner.align(entry["fasta"], fasta_file, f"ref__{safe_query}", self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def process(self, gene_id):
         print(f"\n{'='*50}")
@@ -767,7 +814,7 @@ class GeneIDProcessor:
             return None
 
         # 比对
-        result = self.aligner.align(self.query_genome, fasta_file, gene_id)
+        result = self._align_queries(fasta_file, gene_id)
         if not result:
             return None
 
@@ -800,26 +847,52 @@ class GeneIDProcessor:
 class LocationProcessor:
     """Location 模式处理器"""
 
-    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000):
+    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None):
         self.extractor = SequenceExtractor(ref_genome, None, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
         self.query_genome = query_genome
+        self.query_entries = normalize_query_entries(query_genome, qry_name, qry_gff, query_entries)
         self.output_dir = output_dir
         self.ref_name = ref_name
-        self.qry_name = qry_name
+        self.qry_name = self.query_entries[0]["name"] if self.query_entries else qry_name
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
         # 保存基因组文件路径
         self.genome_files = {
             'ref_fasta': ref_genome,
-            'qry_fasta': query_genome,
+            'qry_fasta': self.query_entries[0]["fasta"] if self.query_entries else query_genome,
             'ref_gff': ref_gff,  # 参考基因组 GFF（用于提取区域内的基因注释）
-            'qry_gff': qry_gff   # 查询基因组 GFF（用于提取比对区域的注释）
+            'qry_gff': self.query_entries[0]["gff"] if self.query_entries else qry_gff,
+            'queries': self.query_entries,
         }
         # 查询基因组索引文件（用于宏观概览图）
         self.qry_index_file = f"{query_genome}.fai" if query_genome else None
+
+    def _align_queries(self, fasta_file, item_id):
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            aligned = self.aligner.align(entry["fasta"], fasta_file, f"ref__{safe_query}", self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def process(self, chrom, start, end, name=None):
         loc_name = name or f"{chrom}_{start}_{end}"
@@ -833,7 +906,7 @@ class LocationProcessor:
             return None
 
         # 比对
-        result = self.aligner.align(self.query_genome, fasta_file, loc_name)
+        result = self._align_queries(fasta_file, loc_name)
         if not result:
             return None
 
@@ -862,21 +935,47 @@ class LocationProcessor:
 class SequenceProcessor:
     """Sequence 模式处理器"""
 
-    def __init__(self, ref_genome, output_dir, ref_name="", identity=90, ref_gff=None, min_aln_len=100, merge_gap=1000):
+    def __init__(self, ref_genome, output_dir, ref_name="", identity=90, ref_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None):
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
+        self.query_entries = normalize_query_entries(ref_genome, ref_name, ref_gff, query_entries)
         self.output_dir = output_dir
-        self.ref_name = ref_name
+        self.ref_name = self.query_entries[0]["name"] if self.query_entries else ref_name
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
         # 保存基因组文件路径
         self.genome_files = {
             'ref_fasta': ref_genome,
-            'ref_gff': ref_gff  # 参考基因组 GFF（用于提取比对区域的注释）
+            'ref_gff': ref_gff,
+            'queries': self.query_entries,
         }
         # 参考基因组索引文件（用于宏观概览图）
         self.ref_index_file = f"{ref_genome}.fai" if ref_genome else None
+
+    def _align_queries(self, fasta_file, item_id):
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            aligned = self.aligner.align(entry["fasta"], fasta_file, f"ref__{safe_query}", self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def process(self, seq_file):
         """处理序列文件（支持多序列 FASTA）"""
@@ -927,7 +1026,7 @@ class SequenceProcessor:
             f.write(f">{safe_seq_id}\n{sequence}\n")
 
         # 比对
-        result = self.aligner.align(self.ref_genome, fasta_file, safe_seq_id)
+        result = self._align_queries(fasta_file, safe_seq_id)
         if not result:
             return None
 
@@ -1112,18 +1211,18 @@ def main():
         if args.upstream > 0 or args.downstream > 0:
             print(f"[WARNING] -u/-d 参数仅在 Gene ID 模式下有效，当前 Sequence 模式将忽略这些参数")
         sequence_target = ref_entry
+        resolved_queries = None
         if query_entries:
             resolved_queries = [
                 _resolve_genome_entry(entry, role="目标基因组")
                 for entry in query_entries
             ]
-            if len(resolved_queries) > 1:
-                print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
             sequence_target = resolved_queries[0]
         processor = SequenceProcessor(
             sequence_target.fasta, args.output, sequence_target.name, args.identity,
             ref_gff=sequence_target.annotation,
-            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
+            query_entries=resolved_queries
         )
         processor.process(args.seq)
 
@@ -1137,8 +1236,6 @@ def main():
             _resolve_genome_entry(entry, role="目标基因组")
             for entry in query_entries
         ]
-        if len(resolved_queries) > 1:
-            print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
         query_entry = resolved_queries[0]
         qry_genome = query_entry.fasta
         qry_annotation = query_entry.annotation
@@ -1147,7 +1244,8 @@ def main():
         processor = GeneIDProcessor(
             ref_genome, ref_annotation, qry_genome, args.output, ref_name, qry_name, args.identity,
             qry_gff=qry_annotation, upstream=args.upstream, downstream=args.downstream,
-            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
+            query_entries=resolved_queries
         )
 
         # 判断是文件还是 Gene ID 列表
@@ -1180,8 +1278,6 @@ def main():
             _resolve_genome_entry(entry, role="目标基因组")
             for entry in query_entries
         ]
-        if len(resolved_queries) > 1:
-            print("[INFO] 已解析多个 -qry；当前阶段先使用第一个 query，后续多 query 计算将在同一框架接入")
         query_entry = resolved_queries[0]
         qry_genome = query_entry.fasta
         qry_annotation = query_entry.annotation
@@ -1190,7 +1286,8 @@ def main():
         processor = LocationProcessor(
             ref_genome, qry_genome, args.output, ref_name, qry_name, args.identity,
             ref_gff=ref_annotation, qry_gff=qry_annotation,
-            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap
+            min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
+            query_entries=resolved_queries
         )
 
         # 判断是文件还是区域字符串列表

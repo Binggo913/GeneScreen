@@ -175,6 +175,10 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * CLI parses repeated `-qry` entries as preloaded, explicit, or mixed query genome entries.
   * GUI shared genome selector supports an add/remove query list while preserving single-query fallback behavior.
   * Gene ID, Location, and Sequence pages use the shared multi-query-capable selector.
+* Phase 3 ref-query alignment foundation:
+  * CLI and GUI processors iterate all selected query genomes for Gene ID, Location, and Sequence workflows.
+  * Ref-query artifacts are written under `queries/<query-name>/ref__<query-name>.*`.
+  * `data.json` supports multiple query tracks, ref-query pairs, per-query candidates, and selected default links.
 
 ## Acceptance Criteria
 

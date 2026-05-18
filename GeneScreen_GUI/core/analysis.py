@@ -44,6 +44,38 @@ def ensure_blast_db(fasta_path: str) -> bool:
     return True
 
 
+def sanitize_path_segment(text: Any) -> str:
+    """清理用于输出子目录名的输入 ID。"""
+    return re.sub(r'[<>:"/\\|?*]', "_", str(text)).strip()
+
+
+def _normalize_query_entries(
+    query_genome: Optional[str],
+    qry_name: str = "",
+    qry_gff: Optional[str] = None,
+    query_genomes: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    entries: List[Dict[str, Any]] = []
+    if query_genomes:
+        for index, genome in enumerate(query_genomes, start=1):
+            fasta = genome.get("fasta_path") or genome.get("fasta") or genome.get("path")
+            if not fasta:
+                continue
+            name = genome.get("name") or genome.get("display_name") or f"query_{index}"
+            entries.append({
+                "name": name,
+                "fasta": fasta,
+                "gff": genome.get("annotation_path") or genome.get("gff"),
+            })
+    elif query_genome:
+        entries.append({
+            "name": qry_name or "query",
+            "fasta": query_genome,
+            "gff": qry_gff,
+        })
+    return entries
+
+
 class SequenceExtractor:
     """使用 pyfaidx 从参考基因组提取序列"""
 
@@ -580,14 +612,16 @@ class GeneIDProcessor:
         qry_gff: Optional[str] = None,
         upstream: int = 0,
         downstream: int = 0,
-        min_aln_len: int = 100
+        min_aln_len: int = 100,
+        query_genomes: Optional[List[Dict[str, Any]]] = None
     ):
         self.extractor = SequenceExtractor(ref_genome, ref_annotation, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.query_genome = query_genome
+        self.query_entries = _normalize_query_entries(query_genome, qry_name, qry_gff, query_genomes)
         self.output_dir = output_dir
         self.ref_name = ref_name
-        self.qry_name = qry_name
+        self.qry_name = self.query_entries[0]["name"] if self.query_entries else qry_name
         self.identity = identity
         self.upstream = upstream
         self.downstream = downstream
@@ -595,9 +629,35 @@ class GeneIDProcessor:
         self.genome_files = {
             'ref_fasta': ref_genome,
             'ref_gff': ref_annotation,
-            'qry_fasta': query_genome,
-            'qry_gff': qry_gff
+            'qry_fasta': self.query_entries[0]["fasta"] if self.query_entries else query_genome,
+            'qry_gff': self.query_entries[0]["gff"] if self.query_entries else qry_gff,
+            'queries': self.query_entries,
         }
+
+    def _align_queries(self, fasta_file: str, item_id: str) -> Optional[Dict[str, Any]]:
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            pair_prefix = f"ref__{safe_query}"
+            aligned = self.aligner.align(entry["fasta"], fasta_file, pair_prefix, self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def process(self, gene_id: str) -> Optional[Dict[str, Any]]:
         """处理单个基因"""
@@ -611,7 +671,7 @@ class GeneIDProcessor:
         if not fasta_file:
             return None
 
-        result = self.aligner.align(self.query_genome, fasta_file, gene_id, self.identity)
+        result = self._align_queries(fasta_file, gene_id)
         if not result:
             return None
 
@@ -649,23 +709,51 @@ class LocationProcessor:
         identity: float = 90,
         ref_gff: Optional[str] = None,
         qry_gff: Optional[str] = None,
-        min_aln_len: int = 100
+        min_aln_len: int = 100,
+        query_genomes: Optional[List[Dict[str, Any]]] = None
     ):
         self.extractor = SequenceExtractor(ref_genome, None, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
         self.query_genome = query_genome
+        self.query_entries = _normalize_query_entries(query_genome, qry_name, qry_gff, query_genomes)
         self.output_dir = output_dir
         self.ref_name = ref_name
-        self.qry_name = qry_name
+        self.qry_name = self.query_entries[0]["name"] if self.query_entries else qry_name
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.genome_files = {
             'ref_fasta': ref_genome,
-            'qry_fasta': query_genome,
+            'qry_fasta': self.query_entries[0]["fasta"] if self.query_entries else query_genome,
             'ref_gff': ref_gff,
-            'qry_gff': qry_gff
+            'qry_gff': self.query_entries[0]["gff"] if self.query_entries else qry_gff,
+            'queries': self.query_entries,
         }
+
+    def _align_queries(self, fasta_file: str, item_id: str) -> Optional[Dict[str, Any]]:
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            pair_prefix = f"ref__{safe_query}"
+            aligned = self.aligner.align(entry["fasta"], fasta_file, pair_prefix, self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def process(
         self,
@@ -684,7 +772,7 @@ class LocationProcessor:
         if not fasta_file:
             return None
 
-        result = self.aligner.align(self.query_genome, fasta_file, loc_name, self.identity)
+        result = self._align_queries(fasta_file, loc_name)
         if not result:
             return None
 
@@ -717,18 +805,48 @@ class SequenceProcessor:
         ref_name: str = "",
         identity: float = 90,
         ref_gff: Optional[str] = None,
-        min_aln_len: int = 100
+        min_aln_len: int = 100,
+        query_genomes: Optional[List[Dict[str, Any]]] = None
     ):
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
+        self.query_entries = _normalize_query_entries(
+            ref_genome, ref_name, ref_gff, query_genomes
+        )
         self.output_dir = output_dir
-        self.ref_name = ref_name
+        self.ref_name = self.query_entries[0]["name"] if self.query_entries else ref_name
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.genome_files = {
             'ref_fasta': ref_genome,
-            'ref_gff': ref_gff
+            'ref_gff': ref_gff,
+            'queries': self.query_entries,
         }
+
+    def _align_queries(self, fasta_file: str, item_id: str) -> Optional[Dict[str, Any]]:
+        query_results = []
+        original_output_dir = self.aligner.output_dir
+        for entry in self.query_entries:
+            safe_query = sanitize_path_segment(entry["name"]) or "query"
+            query_dir = os.path.join(self.output_dir, "queries", safe_query)
+            os.makedirs(query_dir, exist_ok=True)
+            self.aligner.output_dir = query_dir
+            pair_prefix = f"ref__{safe_query}"
+            aligned = self.aligner.align(entry["fasta"], fasta_file, pair_prefix, self.identity)
+            if not aligned:
+                continue
+            aligned["query_name"] = entry["name"]
+            aligned["query_fasta"] = entry["fasta"]
+            aligned["query_gff"] = entry.get("gff")
+            aligned["query_dir"] = query_dir
+            query_results.append(aligned)
+        self.aligner.output_dir = original_output_dir
+        if not query_results:
+            return None
+        result = dict(query_results[0])
+        result["query_results"] = query_results
+        result["queries"] = self.query_entries
+        return result
 
     def set_output_dir(self, output_dir: str):
         """设置输出目录（同时更新 aligner）"""
@@ -749,7 +867,7 @@ class SequenceProcessor:
                 if not line.startswith(">"):
                     sequence += line.strip()
 
-        result = self.aligner.align(self.ref_genome, processed_file, seq_id, self.identity)
+        result = self._align_queries(processed_file, seq_id)
         if not result:
             return None
 
@@ -773,7 +891,7 @@ class SequenceProcessor:
         with open(fasta_file, "w") as f:
             f.write(f">{safe_seq_id}\n{sequence}\n")
         
-        result = self.aligner.align(self.ref_genome, fasta_file, safe_seq_id, self.identity)
+        result = self._align_queries(fasta_file, safe_seq_id)
         if not result:
             return None
 

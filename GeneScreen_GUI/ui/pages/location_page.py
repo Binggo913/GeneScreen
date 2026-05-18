@@ -257,6 +257,7 @@ class LocationPage(QWidget):
         # 获取基因组
         ref_genome = self.genome_selector.get_ref_genome()
         qry_genome = self.genome_selector.get_qry_genome()
+        qry_genomes = self.genome_selector.get_qry_genomes()
         
         if not ref_genome.get("fasta_path"):
             QMessageBox.warning(self, "提示", "请选择参考基因组")
@@ -324,7 +325,8 @@ class LocationPage(QWidget):
             identity=identity,
             ref_gff=ref_genome.get("annotation_path"),
             qry_gff=qry_genome.get("annotation_path"),
-            min_aln_len=min_aln_len
+            min_aln_len=min_aln_len,
+            query_genomes=qry_genomes
         )
         
         # 启动分析线程
