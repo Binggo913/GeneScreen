@@ -7,7 +7,7 @@ import sys
 import ctypes
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMessageBox, QLabel
+from PySide6.QtWidgets import QApplication, QMessageBox, QLabel, QStyleFactory
 from PySide6.QtGui import QIcon
 from PySide6.QtCore import Qt
 
@@ -30,6 +30,9 @@ def main():
 
     # 创建应用
     app = QApplication(sys.argv)
+    fusion_style = QStyleFactory.create("Fusion")
+    if fusion_style:
+        app.setStyle(fusion_style)
     app.setApplicationName("GeneScreen")
     app.setApplicationVersion("1.0")
     app.setOrganizationName("GeneScreen")

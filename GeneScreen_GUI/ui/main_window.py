@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMessageBox
 )
 from PySide6.QtCore import Qt, QSize, QEvent, QPoint, QPointF, QRect
-from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPixmap, QBrush, QPainterPath, QRegion
+from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPixmap, QBrush, QPainterPath, QRegion, QPalette
 
 import math
 import sys
@@ -123,6 +123,8 @@ class MainWindow(QMainWindow):
         self._dark_mode = False
         self._resize_margin = 6
         self._resize_cursor_active = False
+        app = QApplication.instance()
+        self._base_app_stylesheet = app.styleSheet() if app else ""
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         
@@ -132,7 +134,6 @@ class MainWindow(QMainWindow):
         # 初始化 UI
         self._init_ui()
         self._apply_styles()
-        app = QApplication.instance()
         if app:
             app.installEventFilter(self)
     
@@ -734,6 +735,48 @@ class MainWindow(QMainWindow):
             btn.setProperty("collapsed", collapsed)
             btn.style().unpolish(btn)
             btn.style().polish(btn)
+
+    def _apply_app_palette(
+        self,
+        theme_bg: str,
+        panel_bg: str,
+        panel_text: str,
+        input_bg: str,
+        input_text: str,
+        input_placeholder: str,
+        input_border: str,
+        table_alt: str,
+        secondary_button_bg: str,
+        secondary_button_text: str,
+        readonly_text: str,
+    ):
+        app = QApplication.instance()
+        if not app:
+            return
+
+        palette = QPalette()
+        palette.setColor(QPalette.Window, QColor(theme_bg))
+        palette.setColor(QPalette.WindowText, QColor(panel_text))
+        palette.setColor(QPalette.Base, QColor(input_bg))
+        palette.setColor(QPalette.AlternateBase, QColor(table_alt))
+        palette.setColor(QPalette.ToolTipBase, QColor(panel_bg))
+        palette.setColor(QPalette.ToolTipText, QColor(panel_text))
+        palette.setColor(QPalette.Text, QColor(input_text))
+        palette.setColor(QPalette.Button, QColor(secondary_button_bg))
+        palette.setColor(QPalette.ButtonText, QColor(secondary_button_text))
+        palette.setColor(QPalette.BrightText, QColor("#ffffff"))
+        palette.setColor(QPalette.Link, QColor(secondary_button_text))
+        palette.setColor(QPalette.Highlight, QColor("#2f80ff"))
+        palette.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        palette.setColor(QPalette.PlaceholderText, QColor(input_placeholder))
+
+        palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(readonly_text))
+        palette.setColor(QPalette.Disabled, QPalette.Text, QColor(readonly_text))
+        palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(readonly_text))
+        palette.setColor(QPalette.Disabled, QPalette.Base, QColor(input_bg))
+        palette.setColor(QPalette.Disabled, QPalette.Button, QColor(input_border))
+
+        app.setPalette(palette)
     
     def _apply_styles(self):
         """应用样式"""
@@ -827,7 +870,21 @@ class MainWindow(QMainWindow):
         if hasattr(self, "window_root"):
             self.window_root.set_theme(theme_bg, theme_border, radius=12)
 
-        self.setStyleSheet(f"""
+        self._apply_app_palette(
+            theme_bg,
+            panel_bg,
+            panel_text,
+            input_bg,
+            input_text,
+            input_placeholder,
+            input_border,
+            table_alt,
+            secondary_button_bg,
+            secondary_button_text,
+            readonly_text,
+        )
+
+        theme_stylesheet = f"""
             /* 标题栏 */
             #titleBar {{
                 background: {theme_bg};
@@ -1281,4 +1338,9 @@ class MainWindow(QMainWindow):
                 background: #f3f4f6;
                 color: #666666;
             }}
-        """)
+        """
+
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(f"{self._base_app_stylesheet}\n{theme_stylesheet}")
+        self.setStyleSheet(theme_stylesheet)
