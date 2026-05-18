@@ -5,9 +5,10 @@ GeneScreen 1.0 - 基因组选择器组件
 """
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QComboBox,
-    QLabel, QPushButton, QFrame, QMessageBox, QListWidget, QListWidgetItem
+    QLabel, QPushButton, QFrame, QMessageBox, QListWidget, QListWidgetItem,
+    QSizePolicy
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QSize
 
 from core import get_genome_manager, get_database
 
@@ -243,6 +244,10 @@ class GenomeSelector(QWidget):
 
 class GenomePairSelector(QWidget):
     """基因组对选择器（参考 + 查询）"""
+
+    MULTI_QUERY_MIN_HEIGHT = 260
+    MULTI_QUERY_WITH_REF_ANNOTATION_MIN_HEIGHT = 310
+    GROUP_BOX_VERTICAL_ALLOWANCE = 54
     
     # 信号
     ref_changed = Signal(str, dict)
@@ -261,6 +266,9 @@ class GenomePairSelector(QWidget):
         self._last_ref_name = ""
         self._last_qry_name = ""
         self._init_ui()
+        if self.multi_query:
+            self.setMinimumHeight(self._multi_query_min_height())
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
     
     def _init_ui(self):
         """初始化 UI"""
@@ -316,12 +324,35 @@ class GenomePairSelector(QWidget):
             query_box.addLayout(action_layout)
 
             self.qry_list = QListWidget()
-            self.qry_list.setMinimumHeight(92)
-            self.qry_list.setMaximumHeight(140)
+            self.qry_list.setFixedHeight(86)
+            self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             self.qry_list.setAlternatingRowColors(True)
             query_box.addWidget(self.qry_list)
 
             layout.addLayout(query_box)
+
+    def _multi_query_min_height(self) -> int:
+        if self.show_ref_annotation:
+            return self.MULTI_QUERY_WITH_REF_ANNOTATION_MIN_HEIGHT
+        return self.MULTI_QUERY_MIN_HEIGHT
+
+    def recommended_group_min_height(self) -> int:
+        """Minimum QGroupBox height needed to avoid clipping this selector."""
+        if not self.multi_query:
+            return self.sizeHint().height() + self.GROUP_BOX_VERTICAL_ALLOWANCE
+        return self._multi_query_min_height() + self.GROUP_BOX_VERTICAL_ALLOWANCE
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint()
+        if self.multi_query:
+            hint.setHeight(max(hint.height(), self._multi_query_min_height()))
+        return hint
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if self.multi_query:
+            hint.setHeight(max(hint.height(), self._multi_query_min_height()))
+        return hint
     
     def get_ref_genome(self) -> dict:
         """获取参考基因组"""

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
     QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem,
-    QCheckBox
+    QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -179,13 +179,17 @@ class GeneIDPage(QWidget):
         
         # 基因组选择
         genome_group = QGroupBox("基因组选择")
+        genome_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         genome_layout = QVBoxLayout(genome_group)
+        genome_layout.setContentsMargins(14, 24, 14, 14)
+        genome_layout.setSpacing(0)
         self.genome_selector = GenomePairSelector(show_manage_btn=False, show_ref_annotation=True,
                                                    multi_query=True,
                                                    ref_annotation_label="参考注释版本")
         self.genome_selector.ref_changed.connect(self._on_ref_genome_changed)
         self.genome_selector.ref_annotation_changed.connect(self._on_ref_annotation_changed)
         genome_layout.addWidget(self.genome_selector)
+        genome_group.setMinimumHeight(self.genome_selector.recommended_group_min_height())
         layout.addWidget(genome_group)
         
         # 输入区域

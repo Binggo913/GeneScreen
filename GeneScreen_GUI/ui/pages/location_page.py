@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTextEdit, QGroupBox, QFormLayout,
     QSpinBox, QProgressBar, QMessageBox, QFileDialog,
-    QAbstractSpinBox, QCheckBox
+    QAbstractSpinBox, QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import QThread, Signal, Qt
 from datetime import datetime
@@ -101,9 +101,13 @@ class LocationPage(QWidget):
         
         # 基因组选择
         genome_group = QGroupBox("基因组选择")
+        genome_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         genome_layout = QVBoxLayout(genome_group)
+        genome_layout.setContentsMargins(14, 24, 14, 14)
+        genome_layout.setSpacing(0)
         self.genome_selector = GenomePairSelector(show_manage_btn=False, multi_query=True)
         genome_layout.addWidget(self.genome_selector)
+        genome_group.setMinimumHeight(self.genome_selector.recommended_group_min_height())
         layout.addWidget(genome_group)
         
         # 输入区域
