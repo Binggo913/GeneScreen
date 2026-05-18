@@ -443,27 +443,32 @@ QStatusBar {
 /* ==================== 对话框样式 ==================== */
 
 QDialog {
-    background: white;
+    background-color: white;
     color: #303133;
 }
 
 QMessageBox {
-    background: white;
+    background-color: white;
     color: #303133;
 }
 
 QDialog QWidget, QMessageBox QWidget {
-    background: white;
+    background-color: white;
     color: #303133;
 }
 
 QDialog QLabel, QMessageBox QLabel {
-    background: white;
+    background-color: white;
+    color: #303133;
+}
+
+QMessageBox * {
+    background-color: white;
     color: #303133;
 }
 
 QMessageBox QPushButton {
-    background: #f3f4f6;
+    background-color: #f3f4f6;
     color: #667eea;
     border: 1px solid #cfd6e4;
     border-radius: 6px;
@@ -472,7 +477,7 @@ QMessageBox QPushButton {
 }
 
 QMessageBox QPushButton:hover {
-    background: #e9edf5;
+    background-color: #e9edf5;
     border-color: #667eea;
 }
 

@@ -1343,22 +1343,27 @@ class MainWindow(QMainWindow):
             }}
 
             QDialog, QMessageBox {{
-                background: {panel_bg};
+                background-color: {panel_bg};
                 color: {panel_text};
             }}
 
             QDialog QWidget, QMessageBox QWidget {{
-                background: {panel_bg};
+                background-color: {panel_bg};
                 color: {panel_text};
             }}
 
             QDialog QLabel, QMessageBox QLabel {{
-                background: {panel_bg};
+                background-color: {panel_bg};
+                color: {panel_text};
+            }}
+
+            QMessageBox * {{
+                background-color: {panel_bg};
                 color: {panel_text};
             }}
 
             QMessageBox QPushButton, QDialog QPushButton {{
-                background: {secondary_button_bg};
+                background-color: {secondary_button_bg};
                 color: {secondary_button_text};
                 border: 1px solid {secondary_button_border};
                 border-radius: 6px;
@@ -1367,12 +1372,12 @@ class MainWindow(QMainWindow):
             }}
 
             QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
-                background: {secondary_button_hover};
+                background-color: {secondary_button_hover};
                 border-color: {secondary_button_text};
             }}
 
             QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
-                background: {secondary_button_pressed};
+                background-color: {secondary_button_pressed};
             }}
             
             /* 状态栏 */
