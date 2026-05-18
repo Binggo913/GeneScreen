@@ -185,6 +185,10 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * `data.json` records query-query pair artifacts for static report switching.
   * CLI exposes `--candidate-limit` (default `3`) and `--pairwise-all`.
   * GUI Gene ID, Location, and Sequence pages expose Pairwise Top-N and full-candidate options.
+* Phase 4 static report foundation:
+  * Multi-query `report/index.html` renders from `data.json` with embedded fallback data for direct local opening.
+  * Report includes overview candidate selection, detail candidate dropdowns, and drag/reorderable tracks.
+  * N=1 reports continue to use the legacy detailed LINKVIEW HTML through the new report path.
 
 ## Acceptance Criteria
 

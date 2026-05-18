@@ -715,7 +715,10 @@ def write_static_report(
         json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     index_path = os.path.join(report_dir, "index.html")
-    if legacy_report and os.path.exists(legacy_report):
+    if payload.get("statistics", {}).get("query_count", 0) > 1:
+        with open(index_path, "w", encoding="utf-8") as handle:
+            handle.write(_render_multi_query_report_html(payload))
+    elif legacy_report and os.path.exists(legacy_report):
         with open(legacy_report, "r", encoding="utf-8", errors="ignore") as handle:
             html = handle.read()
         marker = '<meta name="genescreen-report-schema" content="multi_query_report.v1">'
@@ -732,3 +735,202 @@ def write_static_report(
                 "</body></html>"
             )
     return index_path
+
+
+def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
+    embedded = json.dumps(payload, ensure_ascii=False)
+    title = payload.get("input", {}).get("id") or "GeneScreen Report"
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="genescreen-report-schema" content="multi_query_report.v1">
+  <title>{title} - GeneScreen</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; font-family: Arial, 'Microsoft YaHei', sans-serif; color: #17202a; background: #f6f8fb; }}
+    header {{ padding: 18px 24px; background: #ffffff; border-bottom: 1px solid #d9e0ea; }}
+    h1 {{ margin: 0 0 6px; font-size: 22px; font-weight: 700; }}
+    .subtle {{ color: #5d6979; font-size: 13px; }}
+    main {{ padding: 18px 24px 32px; max-width: 1500px; margin: 0 auto; }}
+    .cards {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }}
+    .card, .panel {{ background: #fff; border: 1px solid #d9e0ea; border-radius: 6px; }}
+    .card {{ padding: 14px 16px; min-height: 96px; }}
+    .card h2, .panel h2 {{ margin: 0 0 10px; font-size: 15px; }}
+    .metrics {{ display: flex; flex-wrap: wrap; gap: 14px; }}
+    .metric strong {{ display: block; font-size: 22px; line-height: 1.1; }}
+    .metric span {{ color: #5d6979; font-size: 12px; }}
+    .panel {{ padding: 14px 16px; margin-bottom: 14px; }}
+    .overview-row, .track-row {{ display: grid; grid-template-columns: 180px 1fr; gap: 12px; align-items: center; min-height: 44px; }}
+    .track-label {{ font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+    .lane {{ position: relative; height: 34px; border-left: 1px solid #c6d0dd; border-right: 1px solid #c6d0dd; background: linear-gradient(#fff, #fff) padding-box; }}
+    .candidate {{ position: absolute; top: 9px; height: 16px; min-width: 3px; background: #5b8def; border: 1px solid #2e63c7; cursor: pointer; }}
+    .candidate.best {{ background: #27ae60; border-color: #1e874b; }}
+    .candidate.selected {{ outline: 2px solid #111827; outline-offset: 1px; }}
+    .detail-layout {{ display: grid; grid-template-columns: 260px 1fr; gap: 14px; }}
+    .controls {{ border-right: 1px solid #e0e5ec; padding-right: 12px; }}
+    .control-row {{ display: grid; grid-template-columns: 1fr 32px 32px; gap: 6px; margin-bottom: 8px; align-items: center; }}
+    select, button {{ height: 30px; border: 1px solid #bcc7d5; border-radius: 4px; background: #fff; }}
+    button {{ cursor: pointer; }}
+    .track-stack {{ position: relative; min-height: 180px; }}
+    .track-row {{ border: 1px solid #dde4ee; border-radius: 6px; background: #fbfcfe; padding: 8px; margin-bottom: 8px; cursor: grab; }}
+    .track-row.dragging {{ opacity: .5; }}
+    svg.links {{ position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }}
+    .empty {{ color: #6b7280; padding: 18px; }}
+    @media (max-width: 900px) {{
+      main {{ padding: 12px; }}
+      .cards, .detail-layout {{ grid-template-columns: 1fr; }}
+      .overview-row, .track-row {{ grid-template-columns: 120px 1fr; }}
+      .controls {{ border-right: 0; padding-right: 0; }}
+    }}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{title}</h1>
+    <div class="subtle">GeneScreen multi-query static report</div>
+  </header>
+  <main>
+    <section class="cards">
+      <div class="card"><h2>输入与候选</h2><div id="inputMetrics" class="metrics"></div></div>
+      <div class="card"><h2>当前组合统计</h2><div id="variantMetrics" class="metrics"></div></div>
+    </section>
+    <section class="panel">
+      <h2>Overview</h2>
+      <div id="overview"></div>
+    </section>
+    <section class="panel">
+      <h2>Detail</h2>
+      <div class="detail-layout">
+        <div id="controls" class="controls"></div>
+        <div id="detail" class="track-stack"></div>
+      </div>
+    </section>
+  </main>
+  <script id="embedded-report-data" type="application/json">{embedded}</script>
+  <script>
+    let reportData = JSON.parse(document.getElementById('embedded-report-data').textContent);
+    fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => {{ reportData = data; init(); }}).catch(init);
+
+    const state = {{ selected: {{}}, order: [] }};
+    function init() {{
+      state.selected = Object.assign({{}}, reportData.default_selection.selected_candidates || {{}});
+      state.order = (reportData.default_selection.track_order || []).slice();
+      renderCards();
+      renderOverview();
+      renderControls();
+      renderDetail();
+    }}
+    function queryIds() {{ return (reportData.overview && reportData.overview.query_order) || []; }}
+    function candidateById(queryId, candidateId) {{
+      return (reportData.candidates[queryId] || []).find(c => c.candidate_id === candidateId);
+    }}
+    function renderCards() {{
+      const s = reportData.statistics || {{}};
+      const variants = (s.selected_combination && s.selected_combination.variants) || {{}};
+      document.getElementById('inputMetrics').innerHTML = [
+        metric('Genomes', s.genome_count || 0),
+        metric('Queries', s.query_count || 0),
+        metric('Candidates', s.total_candidate_count || 0)
+      ].join('');
+      document.getElementById('variantMetrics').innerHTML = [
+        metric('Links', (s.selected_combination && s.selected_combination.link_count) || 0),
+        metric('SNP', variants.SNP || 0),
+        metric('INS', variants.INS || 0),
+        metric('DEL', variants.DEL || 0)
+      ].join('');
+    }}
+    function metric(label, value) {{ return `<div class="metric"><strong>${{value}}</strong><span>${{label}}</span></div>`; }}
+    function renderOverview() {{
+      const root = document.getElementById('overview');
+      root.innerHTML = '';
+      for (const qid of queryIds()) {{
+        const track = reportData.tracks.find(t => t.track_id === qid) || {{ name: qid }};
+        const row = document.createElement('div');
+        row.className = 'overview-row';
+        row.innerHTML = `<div class="track-label" title="${{track.name}}">${{track.name}}</div><div class="lane"></div>`;
+        const lane = row.querySelector('.lane');
+        const candidates = reportData.candidates[qid] || [];
+        const maxEnd = Math.max(...candidates.map(c => c.query_end || 1), 1);
+        for (const candidate of candidates) {{
+          const el = document.createElement('div');
+          el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
+          const start = Math.max(0, ((candidate.query_start || 1) / maxEnd) * 100);
+          const end = Math.max(start + 0.5, ((candidate.query_end || candidate.query_start || 1) / maxEnd) * 100);
+          el.style.left = `${{Math.min(start, 99)}}%`;
+          el.style.width = `${{Math.max(0.5, Math.min(end - start, 100 - start))}}%`;
+          el.title = `${{candidate.candidate_id}} ${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`;
+          el.onclick = () => {{ state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); }};
+          lane.appendChild(el);
+        }}
+        root.appendChild(row);
+      }}
+    }}
+    function renderControls() {{
+      const root = document.getElementById('controls');
+      root.innerHTML = '';
+      for (const qid of queryIds()) {{
+        const track = reportData.tracks.find(t => t.track_id === qid) || {{ name: qid }};
+        const row = document.createElement('div');
+        row.className = 'control-row';
+        const options = (reportData.candidates[qid] || []).map(c => `<option value="${{c.candidate_id}}" ${{state.selected[qid] === c.candidate_id ? 'selected' : ''}}>${{track.name}} · ${{c.candidate_id}}</option>`).join('');
+        row.innerHTML = `<select>${{options}}</select><button title="上移">↑</button><button title="下移">↓</button>`;
+        row.querySelector('select').onchange = e => {{ state.selected[qid] = e.target.value; renderOverview(); renderDetail(); }};
+        row.children[1].onclick = () => moveTrack(qid, -1);
+        row.children[2].onclick = () => moveTrack(qid, 1);
+        root.appendChild(row);
+      }}
+    }}
+    function moveTrack(trackId, delta) {{
+      const index = state.order.indexOf(trackId);
+      const target = index + delta;
+      if (index <= 0 || target <= 0 || target >= state.order.length) return;
+      state.order.splice(index, 1);
+      state.order.splice(target, 0, trackId);
+      renderDetail();
+    }}
+    function renderDetail() {{
+      const root = document.getElementById('detail');
+      root.innerHTML = '';
+      if (!state.order.length) {{ root.innerHTML = '<div class="empty">No tracks</div>'; return; }}
+      for (const trackId of state.order) {{
+        const track = reportData.tracks.find(t => t.track_id === trackId) || {{ name: trackId, role: 'query_genome' }};
+        const row = document.createElement('div');
+        row.className = 'track-row';
+        row.draggable = trackId !== 'ref';
+        row.dataset.trackId = trackId;
+        const candidate = trackId === 'ref' ? null : candidateById(trackId, state.selected[trackId]);
+        const label = candidate ? `${{track.name}} · ${{candidate.candidate_id}} · ${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}` : `${{track.name}} · ref`;
+        row.innerHTML = `<div class="track-label" title="${{label}}">${{label}}</div><div class="lane"></div>`;
+        const lane = row.querySelector('.lane');
+        if (candidate) {{
+          const marker = document.createElement('div');
+          marker.className = 'candidate selected';
+          marker.style.left = '8%';
+          marker.style.width = '84%';
+          lane.appendChild(marker);
+        }}
+        wireDrag(row);
+        root.appendChild(row);
+      }}
+    }}
+    function wireDrag(row) {{
+      row.addEventListener('dragstart', e => {{ row.classList.add('dragging'); e.dataTransfer.setData('text/plain', row.dataset.trackId); }});
+      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      row.addEventListener('dragover', e => e.preventDefault());
+      row.addEventListener('drop', e => {{
+        e.preventDefault();
+        const dragged = e.dataTransfer.getData('text/plain');
+        const target = row.dataset.trackId;
+        if (!dragged || dragged === target || target === 'ref') return;
+        state.order = state.order.filter(id => id !== dragged);
+        const index = state.order.indexOf(target);
+        state.order.splice(index, 0, dragged);
+        renderDetail();
+      }});
+    }}
+  </script>
+</body>
+</html>
+"""
