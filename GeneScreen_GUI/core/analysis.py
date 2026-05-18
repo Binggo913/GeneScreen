@@ -156,6 +156,8 @@ def _precompute_pairwise(
     identity: float,
     candidate_limit: Optional[int] = 3,
     pairwise_all: bool = False,
+    merge_gap: int = 1000,
+    min_aln_len: int = 0,
     upstream: int = 0,
     downstream: int = 0,
 ) -> List[Dict[str, Any]]:
@@ -164,7 +166,11 @@ def _precompute_pairwise(
         if index >= len(query_entries):
             continue
         entry = query_entries[index]
-        candidates = parse_coords_candidates(query_result.get("coords"))
+        candidates = parse_coords_candidates(
+            query_result.get("coords"),
+            merge_gap=merge_gap,
+            min_aln_len=min_aln_len,
+        )
         if not pairwise_all:
             candidates = candidates[:candidate_limit or 3]
         prepared = []
@@ -793,10 +799,11 @@ class GeneIDProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all
+            self.identity, self.candidate_limit, self.pairwise_all, self.merge_gap, self.min_aln_len
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
+        result["merge_gap"] = self.merge_gap
         return result
 
     def process(self, gene_id: str) -> Optional[Dict[str, Any]]:
@@ -899,10 +906,11 @@ class LocationProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all
+            self.identity, self.candidate_limit, self.pairwise_all, self.merge_gap, self.min_aln_len
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
+        result["merge_gap"] = self.merge_gap
         return result
 
     def process(
@@ -1007,10 +1015,11 @@ class SequenceProcessor:
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
             self.identity, self.candidate_limit, self.pairwise_all,
-            self.upstream, self.downstream
+            self.merge_gap, self.min_aln_len, self.upstream, self.downstream
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
+        result["merge_gap"] = self.merge_gap
         result["query_upstream"] = self.upstream
         result["query_downstream"] = self.downstream
         return result

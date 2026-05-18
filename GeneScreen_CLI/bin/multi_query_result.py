@@ -62,12 +62,17 @@ def read_fasta_length(fasta_file: Optional[str]) -> int:
     return length
 
 
-def parse_coords_candidates(coords_file: Optional[str], ref_length: int = 0) -> List[Dict[str, Any]]:
+def parse_coords_candidates(
+    coords_file: Optional[str],
+    ref_length: int = 0,
+    merge_gap: int = 1000,
+    min_aln_len: int = 0,
+) -> List[Dict[str, Any]]:
     """Build query-genome candidate summaries from the BLAST-derived coords file."""
     if not coords_file or not os.path.exists(coords_file):
         return []
 
-    grouped: Dict[str, Dict[str, Any]] = {}
+    blocks_by_chr: Dict[str, List[Dict[str, Any]]] = {}
     with open(coords_file, "r", encoding="utf-8", errors="ignore") as handle:
         for line in handle:
             line = line.strip()
@@ -84,30 +89,20 @@ def parse_coords_candidates(coords_file: Optional[str], ref_length: int = 0) -> 
                 identity = float(parts[6])
             except ValueError:
                 continue
+            if min_aln_len and int((len1 + len2) / 2) < min_aln_len:
+                continue
 
             query_chr = parts[7].split()[0]
             ref_seq = parts[8].split()[0]
-            key = query_chr
-            item = grouped.setdefault(
-                key,
+            strand = "+" if e1 >= s1 else "-"
+            blocks_by_chr.setdefault(query_chr, []).append(
                 {
                     "query_chr": query_chr,
                     "ref_seq": ref_seq,
-                    "blocks": [],
-                    "total_aln_len": 0,
-                    "identity_weighted_sum": 0.0,
-                    "ref_aligned_len": 0,
                     "query_start": min(s1, e1),
                     "query_end": max(s1, e1),
-                    "strand_votes": {"+": 0, "-": 0},
-                },
-            )
-            block_len = max(len1, len2)
-            strand = "+" if e1 >= s1 else "-"
-            item["blocks"].append(
-                {
-                    "query_start": s1,
-                    "query_end": e1,
+                    "raw_query_start": s1,
+                    "raw_query_end": e1,
                     "ref_start": s2,
                     "ref_end": e2,
                     "query_aln_len": len1,
@@ -118,15 +113,68 @@ def parse_coords_candidates(coords_file: Optional[str], ref_length: int = 0) -> 
                     "strand": strand,
                 }
             )
+
+    def build_candidate(group: List[Dict[str, Any]]) -> Dict[str, Any]:
+        item = {
+            "query_chr": group[0]["query_chr"],
+            "ref_seq": group[0]["ref_seq"],
+            "blocks": [],
+            "total_aln_len": 0,
+            "identity_weighted_sum": 0.0,
+            "ref_aligned_len": 0,
+            "query_start": group[0]["query_start"],
+            "query_end": group[0]["query_end"],
+            "strand_votes": {"+": 0, "-": 0},
+        }
+        for block in group:
+            block_len = max(int(block["query_aln_len"]), int(block["ref_aln_len"]))
+            strand = block.get("strand", "+")
+            item["blocks"].append(
+                {
+                    "query_start": block["raw_query_start"],
+                    "query_end": block["raw_query_end"],
+                    "ref_start": block["ref_start"],
+                    "ref_end": block["ref_end"],
+                    "query_aln_len": block["query_aln_len"],
+                    "ref_aln_len": block["ref_aln_len"],
+                    "identity": block["identity"],
+                    "query_chr": block["query_chr"],
+                    "ref_seq": block["ref_seq"],
+                    "strand": strand,
+                }
+            )
             item["total_aln_len"] += block_len
-            item["identity_weighted_sum"] += identity * block_len
-            item["ref_aligned_len"] += len2
-            item["query_start"] = min(item["query_start"], s1, e1)
-            item["query_end"] = max(item["query_end"], s1, e1)
+            item["identity_weighted_sum"] += float(block["identity"]) * block_len
+            item["ref_aligned_len"] += int(block["ref_aln_len"])
+            item["query_start"] = min(item["query_start"], block["query_start"])
+            item["query_end"] = max(item["query_end"], block["query_end"])
             item["strand_votes"][strand] += block_len
+        return item
 
     candidates: List[Dict[str, Any]] = []
-    for item in grouped.values():
+    grouped: List[Dict[str, Any]] = []
+    merge_gap = max(0, int(merge_gap or 0))
+    for chr_blocks in blocks_by_chr.values():
+        sorted_blocks = sorted(chr_blocks, key=lambda b: (b["query_start"], b["query_end"]))
+        current: List[Dict[str, Any]] = []
+        current_end = 0
+        for block in sorted_blocks:
+            if not current:
+                current = [block]
+                current_end = block["query_end"]
+                continue
+            gap = block["query_start"] - current_end
+            if gap <= merge_gap:
+                current.append(block)
+                current_end = max(current_end, block["query_end"])
+            else:
+                grouped.append(build_candidate(current))
+                current = [block]
+                current_end = block["query_end"]
+        if current:
+            grouped.append(build_candidate(current))
+
+    for item in grouped:
         total = item["total_aln_len"]
         avg_identity = item["identity_weighted_sum"] / total if total else 0.0
         coverage = item["ref_aligned_len"] / ref_length if ref_length else 0.0
@@ -299,6 +347,7 @@ def build_multi_query_payload(
     ref_fasta_copy = copy_if_exists(result.get("fasta"), os.path.join(ref_dir, f"{safe_id}.fasta"))
     ref_gff_copy = copy_if_exists(result.get("gff"), os.path.join(ref_dir, f"{safe_id}.gff3"))
     ref_length = read_fasta_length(result.get("fasta"))
+    merge_gap = int(result.get("merge_gap") or 1000)
 
     tracks = [{
         "track_id": "ref",
@@ -344,7 +393,7 @@ def build_multi_query_payload(
         snps_copy = copy_if_exists(query_result.get("snps"), f"{pair_prefix}.snps")
         hl_copy = write_pair_hl(query_result.get("snps"), f"{pair_prefix}.hl")
         candidates = apply_query_flank_metadata(
-            parse_coords_candidates(query_result.get("coords"), ref_length),
+            parse_coords_candidates(query_result.get("coords"), ref_length, merge_gap, min_aln_len),
             int(result.get("query_upstream") or 0),
             int(result.get("query_downstream") or 0),
         )
@@ -474,6 +523,7 @@ def build_multi_query_payload(
             "min_aln_len": min_aln_len,
             "candidate_limit": report_candidate_limit(result),
             "pairwise_all": bool(result.get("pairwise_all", False)),
+            "merge_gap": merge_gap,
             "query_upstream": result.get("query_upstream", 0),
             "query_downstream": result.get("query_downstream", 0),
         },
@@ -577,8 +627,9 @@ def build_single_query_payload(
     hl_copy = write_pair_hl(result.get("snps"), f"{pair_prefix}.hl")
 
     ref_length = read_fasta_length(result.get("fasta"))
+    merge_gap = int(result.get("merge_gap") or 1000)
     candidates = apply_query_flank_metadata(
-        parse_coords_candidates(result.get("coords"), ref_length),
+        parse_coords_candidates(result.get("coords"), ref_length, merge_gap, min_aln_len),
         int(result.get("query_upstream") or 0),
         int(result.get("query_downstream") or 0),
     )
@@ -630,6 +681,7 @@ def build_single_query_payload(
             "min_aln_len": min_aln_len,
             "candidate_limit": report_candidate_limit(result),
             "pairwise_all": bool(result.get("pairwise_all", False)),
+            "merge_gap": merge_gap,
             "query_upstream": result.get("query_upstream", 0),
             "query_downstream": result.get("query_downstream", 0),
         },
