@@ -891,13 +891,47 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       border-radius: 8px;
       overflow-x: auto;
     }
-    .overview-grid, .track-row {
+    .overview-canvas {
+      min-width: 920px;
       display: grid;
-      grid-template-columns: minmax(180px, 260px) minmax(520px, 1fr);
-      gap: 14px;
+      grid-template-columns: 150px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .overview-ref {
+      position: sticky;
+      left: 0;
+      min-height: 100%;
+      border-left: 3px solid #222;
+      border-bottom: 3px solid #222;
+      padding: 12px 0 18px 18px;
+      font-weight: 600;
+      color: #333;
+    }
+    .overview-ref-title { font-size: 15px; margin-bottom: 8px; }
+    .overview-ref-id { font-size: 12px; color: #777; font-weight: 400; word-break: break-all; }
+    .overview-body { display: grid; gap: 16px; }
+    .chr-group {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+      padding: 4px 0;
+    }
+    .chr-label {
+      font-size: 20px;
+      color: #444;
+      font-weight: 600;
+      text-align: right;
+      padding-right: 4px;
+    }
+    .chr-tracks { display: grid; gap: 10px; }
+    .overview-track {
+      display: grid;
+      grid-template-columns: minmax(120px, 180px) minmax(420px, 1fr);
+      gap: 12px;
       align-items: center;
     }
-    .overview-grid { gap: 10px 14px; min-width: 760px; }
     .track-label {
       font-weight: 600;
       overflow: hidden;
@@ -908,26 +942,42 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     .track-subtext { font-size: 12px; color: #777; margin-top: 2px; font-weight: 400; }
     .lane {
       position: relative;
-      height: 38px;
-      border: 1px solid #e1e5ee;
-      border-left: 3px solid #667eea;
-      border-radius: 5px;
-      background: linear-gradient(180deg, #fff 0%, #fbfcff 100%);
+      height: 36px;
+      background: transparent;
+    }
+    .lane::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      top: 17px;
+      height: 3px;
+      background: #252525;
+      border-radius: 3px;
+    }
+    .lane-tick {
+      position: absolute;
+      top: 9px;
+      width: 3px;
+      height: 19px;
+      background: #555;
+      border-radius: 3px;
+      transform: translateX(-50%);
     }
     .candidate {
       position: absolute;
-      top: 10px;
-      height: 16px;
+      top: 12px;
+      height: 12px;
       min-width: 3px;
-      background: #5b8def;
-      border: 1px solid #2e63c7;
-      border-radius: 3px;
+      background: #4f86d9;
+      border: 1px solid #2f5f9f;
+      border-radius: 999px;
       cursor: pointer;
       transition: transform .12s ease, box-shadow .12s ease;
     }
     .candidate:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(46,99,199,.25); }
-    .candidate.best { background: #27ae60; border-color: #1e874b; }
-    .candidate.selected { outline: 2px solid #333; outline-offset: 2px; }
+    .candidate.best { background: #159447; border-color: #0f6c34; }
+    .candidate.selected { outline: 2px solid #111; outline-offset: 3px; }
     .candidate-ref { background: #667eea; border-color: #5364c9; left: 8%; width: 84%; }
     .viz-legend-note {
       margin-top: 15px;
@@ -956,6 +1006,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       margin-bottom: 10px;
       align-items: center;
     }
+    .control-row[draggable="true"] { cursor: grab; }
+    .control-row.dragging { opacity: .55; }
     select, button {
       height: 32px;
       border: 1px solid #ddd;
@@ -967,15 +1019,38 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     button { cursor: pointer; color: #667eea; font-weight: 600; }
     button:hover { background: #f3f0ff; }
     .track-stack { min-width: 760px; }
-    .track-row {
-      border: 1px solid #eee;
+    .detail-canvas {
+      min-width: 820px;
+      border: 1px solid #e6e8ef;
       border-radius: 8px;
-      background: #fff;
-      padding: 10px;
-      margin-bottom: 10px;
-      cursor: grab;
+      background: linear-gradient(180deg, #fff 0%, #fbfcff 100%);
+      overflow-x: auto;
     }
-    .track-row.dragging { opacity: .55; }
+    .detail-svg {
+      display: block;
+      width: 100%;
+      min-width: 820px;
+      height: auto;
+    }
+    .detail-track-bg { fill: #fff; }
+    .detail-track-bg:nth-of-type(even) { fill: #fafbff; }
+    .detail-label { font-size: 13px; font-weight: 600; fill: #333; }
+    .detail-subtext { font-size: 11px; fill: #777; }
+    .detail-axis { stroke: #252525; stroke-width: 3; stroke-linecap: round; }
+    .detail-axis-light { stroke: #a9b1c3; stroke-width: 1; }
+    .detail-block { fill: rgba(102,126,234,.18); stroke: rgba(102,126,234,.35); stroke-width: 1; }
+    .detail-block.reverse { fill: rgba(231,126,34,.16); stroke: rgba(231,126,34,.35); }
+    .detail-match { fill: #4f86d9; stroke: #2f5f9f; stroke-width: 1; }
+    .detail-ref-gene { fill: #667eea; stroke: #5364c9; stroke-width: 1; }
+    .detail-variant.snp { fill: #f39c12; stroke: #b76d00; }
+    .detail-variant.indel { fill: #2d9cdb; stroke: #176a95; }
+    .detail-empty {
+      padding: 22px;
+      border: 1px dashed #d9dce8;
+      border-radius: 8px;
+      color: #777;
+      background: #fff;
+    }
     .empty { color: #777; padding: 18px; }
     .copy-toast {
       position: fixed;
@@ -992,7 +1067,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       body { padding: 10px; }
       .header-content, .detail-layout { display: block; }
       .section { padding: 20px 16px; }
-      .overview-grid, .track-row { grid-template-columns: 140px minmax(420px, 1fr); }
+      .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
+      .overview-track { grid-template-columns: 120px minmax(420px, 1fr); }
       .controls { margin-bottom: 14px; }
     }
   </style>
@@ -1034,7 +1110,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
   <div class="section overview-section visualization-section">
     <h2>宏观比对图</h2>
     <div class="viz-container">
-      <div id="overview" class="overview-grid"></div>
+      <div id="overview" class="overview-canvas"></div>
       <div class="viz-legend-note">
         <p>绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 <code>data.json</code>，切换显示不会重新计算。</p>
       </div>
@@ -1089,6 +1165,55 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function candidateById(queryId, candidateId) {
       return (reportData.candidates[queryId] || []).find(c => c.candidate_id === candidateId);
     }
+    function numberOr(value, fallback) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+    function normRange(a, b) {
+      const x = numberOr(a, 0);
+      const y = numberOr(b, x);
+      return [Math.min(x, y), Math.max(x, y)];
+    }
+    function candidateBounds(candidate) {
+      if (!candidate) return { start: 1, end: 2 };
+      const points = [];
+      if (candidate.query_region_start != null) points.push(Number(candidate.query_region_start));
+      if (candidate.query_region_end != null) points.push(Number(candidate.query_region_end));
+      if (candidate.query_start != null) points.push(Number(candidate.query_start));
+      if (candidate.query_end != null) points.push(Number(candidate.query_end));
+      for (const block of candidate.blocks || []) {
+        points.push(Number(block.query_start), Number(block.query_end));
+      }
+      const clean = points.filter(Number.isFinite);
+      if (!clean.length) return { start: 1, end: 2 };
+      const start = Math.min(...clean);
+      const end = Math.max(...clean);
+      return end > start ? { start, end } : { start, end: start + 1 };
+    }
+    function refLength() {
+      const input = reportData.input || {};
+      if (Number(input.sequence_length) > 0) return Number(input.sequence_length);
+      let maxEnd = 1;
+      for (const qid of queryIds()) {
+        for (const candidate of reportData.candidates[qid] || []) {
+          for (const block of candidate.blocks || []) {
+            maxEnd = Math.max(maxEnd, Number(block.ref_start) || 1, Number(block.ref_end) || 1);
+          }
+        }
+      }
+      return maxEnd;
+    }
+    function xFor(pos, range, left, width) {
+      const span = Math.max(1, range.end - range.start);
+      const p = Math.max(range.start, Math.min(range.end, Number(pos) || range.start));
+      return left + ((p - range.start) / span) * width;
+    }
+    function selectedPairForQuery(qid) {
+      return (reportData.pairs || []).find(p => p.query_genome_id === qid || p.pair_id === `ref__${qid}`);
+    }
+    function variantClass(type) {
+      return String(type || '').toUpperCase() === 'SNP' ? 'snp' : 'indel';
+    }
     function renderHeader() {
       document.getElementById('modeBadge').textContent = reportData.mode || 'GeneScreen';
       document.getElementById('generatedAt').textContent = reportData.generated_at ? `生成时间：${reportData.generated_at}` : '';
@@ -1139,29 +1264,59 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function renderOverview() {
       const root = document.getElementById('overview');
-      root.innerHTML = '';
+      const input = reportData.input || {};
+      const chrMap = new Map();
       for (const qid of queryIds()) {
-        const track = trackById(qid);
-        const row = document.createElement('div');
-        row.className = 'overview-track';
-        row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${(reportData.candidates[qid] || []).length} candidates</div></div><div class="lane"></div>`;
-        const lane = row.querySelector('.lane');
-        const candidates = reportData.candidates[qid] || [];
-        const maxEnd = Math.max(...candidates.map(c => c.query_end || 1), 1);
-        for (const candidate of candidates) {
-          const el = document.createElement('div');
-          el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
-          const start = Math.max(0, ((candidate.query_start || 1) / maxEnd) * 100);
-          const end = Math.max(start + 0.5, ((candidate.query_end || candidate.query_start || 1) / maxEnd) * 100);
-          const region = candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`;
-          const match = candidate.query_match_start ? ` match=${candidate.query_match_start}-${candidate.query_match_end}` : '';
-          el.style.left = `${Math.min(start, 99)}%`;
-          el.style.width = `${Math.max(0.5, Math.min(end - start, 100 - start))}%`;
-          el.title = `${candidate.candidate_id} ${region}${match}`;
-          el.onclick = () => { state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); };
-          lane.appendChild(el);
+        for (const candidate of reportData.candidates[qid] || []) {
+          const chr = candidate.query_chr || 'unknown';
+          if (!chrMap.has(chr)) chrMap.set(chr, []);
+          chrMap.get(chr).push({ qid, candidate, bounds: candidateBounds(candidate) });
         }
-        root.appendChild(row);
+      }
+      if (!chrMap.size) { root.innerHTML = '<div class="empty">No candidates</div>'; return; }
+      const refTitle = esc((reportData.genomes && reportData.genomes.ref && reportData.genomes.ref.name) || 'ref-gene');
+      const refId = esc(input.id || input.safe_id || 'A1');
+      const body = document.createElement('div');
+      body.className = 'overview-body';
+      root.innerHTML = `<div class="overview-ref"><div class="overview-ref-title">${refTitle}</div><div class="overview-ref-id">${refId}</div></div>`;
+      root.appendChild(body);
+      const chrNames = Array.from(chrMap.keys()).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      for (const chr of chrNames) {
+        const entries = chrMap.get(chr);
+        const rangeStart = Math.min(...entries.map(e => e.bounds.start));
+        const rangeEnd = Math.max(...entries.map(e => e.bounds.end), rangeStart + 1);
+        const group = document.createElement('div');
+        group.className = 'chr-group';
+        group.innerHTML = `<div class="chr-label">chr ${esc(chr)}</div><div class="chr-tracks"></div>`;
+        const tracks = group.querySelector('.chr-tracks');
+        for (const qid of queryIds()) {
+          const candidates = entries.filter(e => e.qid === qid).map(e => e.candidate);
+          if (!candidates.length) continue;
+          const track = trackById(qid);
+          const row = document.createElement('div');
+          row.className = 'overview-track';
+          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} candidates</div></div><div class="lane"></div>`;
+          const lane = row.querySelector('.lane');
+          for (const candidate of candidates) {
+            const bounds = candidateBounds(candidate);
+            const left = ((bounds.start - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * 100;
+            const width = Math.max(0.8, ((bounds.end - bounds.start) / Math.max(1, rangeEnd - rangeStart)) * 100);
+            const tick = document.createElement('div');
+            tick.className = 'lane-tick';
+            tick.style.left = `${Math.max(0, Math.min(100, left + width / 2))}%`;
+            lane.appendChild(tick);
+            const el = document.createElement('div');
+            el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
+            const region = candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`;
+            el.style.left = `${Math.max(0, Math.min(99, left))}%`;
+            el.style.width = `${Math.max(0.8, Math.min(width, 100 - left))}%`;
+            el.title = `${candidate.candidate_id} ${region} identity=${candidate.identity || '-'} coverage=${candidate.coverage || '-'}`;
+            el.onclick = () => { state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); };
+            lane.appendChild(el);
+          }
+          tracks.appendChild(row);
+        }
+        body.appendChild(group);
       }
     }
     function renderControls() {
@@ -1171,11 +1326,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const track = trackById(qid);
         const row = document.createElement('div');
         row.className = 'control-row';
+        row.draggable = true;
+        row.dataset.trackId = qid;
         const options = (reportData.candidates[qid] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[qid] === c.candidate_id ? 'selected' : ''}>${esc(track.name)} · ${esc(c.candidate_id)}</option>`).join('');
         row.innerHTML = `<select>${options}</select><button title="上移">↑</button><button title="下移">↓</button>`;
         row.querySelector('select').onchange = e => { state.selected[qid] = e.target.value; renderOverview(); renderDetail(); };
         row.children[1].onclick = () => moveTrack(qid, -1);
         row.children[2].onclick = () => moveTrack(qid, 1);
+        wireControlDrag(row);
         root.appendChild(row);
       }
     }
@@ -1187,50 +1345,112 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       state.order.splice(target, 0, trackId);
       renderDetail();
     }
-    function renderDetail() {
-      const root = document.getElementById('detail');
-      root.innerHTML = '';
-      if (!state.order.length) { root.innerHTML = '<div class="empty">No tracks</div>'; return; }
-      for (const trackId of state.order) {
-        const track = trackById(trackId);
-        const row = document.createElement('div');
-        row.className = 'track-row';
-        row.draggable = trackId !== 'ref';
-        row.dataset.trackId = trackId;
-        const candidate = trackId === 'ref' ? null : candidateById(trackId, state.selected[trackId]);
-        const region = candidate && candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : null;
-        const label = candidate ? `${track.name} · ${candidate.candidate_id} · ${region || `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`}` : `${track.name} · ref`;
-        row.innerHTML = `<div class="track-label" title="${esc(label)}">${esc(label)}<div class="track-subtext">${trackId === 'ref' ? 'reference source sequence' : 'query candidate track'}</div></div><div class="lane"></div>`;
-        const lane = row.querySelector('.lane');
-        if (trackId === 'ref') {
-          const marker = document.createElement('div');
-          marker.className = 'candidate candidate-ref selected';
-          lane.appendChild(marker);
-        } else if (candidate) {
-          const marker = document.createElement('div');
-          marker.className = 'candidate selected';
-          marker.style.left = '8%';
-          marker.style.width = '84%';
-          lane.appendChild(marker);
-        }
-        wireDrag(row);
-        root.appendChild(row);
-      }
-    }
-    function wireDrag(row) {
-      row.addEventListener('dragstart', e => { row.classList.add('dragging'); e.dataTransfer.setData('text/plain', row.dataset.trackId); });
+    function wireControlDrag(row) {
+      row.addEventListener('dragstart', e => {
+        row.classList.add('dragging');
+        e.dataTransfer.setData('text/plain', row.dataset.trackId);
+      });
       row.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.addEventListener('dragover', e => e.preventDefault());
       row.addEventListener('drop', e => {
         e.preventDefault();
         const dragged = e.dataTransfer.getData('text/plain');
         const target = row.dataset.trackId;
-        if (!dragged || dragged === target || target === 'ref') return;
+        if (!dragged || dragged === target) return;
         state.order = state.order.filter(id => id !== dragged);
         const index = state.order.indexOf(target);
-        state.order.splice(index, 0, dragged);
+        state.order.splice(index < 0 ? state.order.length : index, 0, dragged);
+        renderControls();
         renderDetail();
       });
+    }
+    function renderDetail() {
+      const root = document.getElementById('detail');
+      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const rows = order.map(trackId => {
+        const track = trackById(trackId);
+        const candidate = trackId === 'ref' ? null : candidateById(trackId, state.selected[trackId]);
+        const range = trackId === 'ref' ? { start: 1, end: refLength() } : candidateBounds(candidate);
+        return { trackId, track, candidate, range };
+      }).filter(row => row.trackId === 'ref' || row.candidate);
+      if (!rows.length) { root.innerHTML = '<div class="detail-empty">No tracks</div>'; return; }
+
+      const width = 1040;
+      const labelWidth = 250;
+      const plotLeft = 285;
+      const plotWidth = 690;
+      const rowStep = 78;
+      const top = 44;
+      const height = top + rows.length * rowStep + 34;
+      const rowY = row => top + rows.indexOf(row) * rowStep;
+      const refRow = rows.find(r => r.trackId === 'ref');
+      const fragments = [];
+      const ribbons = [];
+      const markers = [];
+
+      for (const row of rows) {
+        const y = rowY(row);
+        const subtitle = row.trackId === 'ref'
+          ? `reference · ${row.range.start}-${row.range.end}`
+          : `${row.candidate.candidate_id} · ${row.candidate.query_chr}:${row.range.start}-${row.range.end}`;
+        fragments.push(`<rect class="detail-track-bg" x="0" y="${y - 30}" width="${width}" height="${rowStep - 8}" rx="8"></rect>`);
+        fragments.push(`<text class="detail-label" x="18" y="${y - 5}">${esc(row.track.name || row.trackId)}</text>`);
+        fragments.push(`<text class="detail-subtext" x="18" y="${y + 14}">${esc(subtitle)}</text>`);
+        fragments.push(`<line class="detail-axis" x1="${plotLeft}" y1="${y}" x2="${plotLeft + plotWidth}" y2="${y}"></line>`);
+        fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 24}">${Number(row.range.start).toLocaleString()}</text>`);
+        fragments.push(`<text class="detail-subtext" x="${plotLeft + plotWidth}" y="${y + 24}" text-anchor="end">${Number(row.range.end).toLocaleString()}</text>`);
+
+        if (row.trackId === 'ref') {
+          const input = reportData.input || {};
+          const info = input.extraction_info || {};
+          const geneStart = Number(info.gene_rel_start || 1);
+          const geneEnd = Number(info.gene_rel_end || input.sequence_length || row.range.end);
+          const x1 = xFor(geneStart, row.range, plotLeft, plotWidth);
+          const x2 = xFor(geneEnd, row.range, plotLeft, plotWidth);
+          fragments.push(`<rect class="detail-ref-gene" x="${Math.min(x1, x2)}" y="${y - 7}" width="${Math.max(3, Math.abs(x2 - x1))}" height="14" rx="7"></rect>`);
+        } else {
+          for (const block of row.candidate.blocks || []) {
+            const [qs, qe] = normRange(block.query_start, block.query_end);
+            const x1 = xFor(qs, row.range, plotLeft, plotWidth);
+            const x2 = xFor(qe, row.range, plotLeft, plotWidth);
+            fragments.push(`<rect class="detail-match" x="${Math.min(x1, x2)}" y="${y - 6}" width="${Math.max(3, Math.abs(x2 - x1))}" height="12" rx="6"></rect>`);
+            if (refRow) {
+              const refY = rowY(refRow);
+              const rx1 = xFor(block.ref_start, refRow.range, plotLeft, plotWidth);
+              const rx2 = xFor(block.ref_end, refRow.range, plotLeft, plotWidth);
+              const qx1 = xFor(block.query_start, row.range, plotLeft, plotWidth);
+              const qx2 = xFor(block.query_end, row.range, plotLeft, plotWidth);
+              const reverse = (Number(block.ref_start) - Number(block.ref_end)) * (Number(block.query_start) - Number(block.query_end)) < 0;
+              ribbons.push(`<polygon class="detail-block${reverse ? ' reverse' : ''}" points="${rx1},${refY + 9} ${rx2},${refY + 9} ${qx2},${y - 9} ${qx1},${y - 9}"></polygon>`);
+            }
+          }
+        }
+      }
+
+      for (const row of rows) {
+        if (row.trackId === 'ref' || !row.candidate || !refRow) continue;
+        const pair = selectedPairForQuery(row.trackId);
+        const pairId = pair && pair.pair_id;
+        const y = rowY(row);
+        const refY = rowY(refRow);
+        for (const variant of reportData.variants || []) {
+          if (pairId && variant.pair_id !== pairId) continue;
+          if (variant.query_chr && row.candidate.query_chr && String(variant.query_chr) !== String(row.candidate.query_chr)) continue;
+          const vClass = variantClass(variant.type);
+          const qPos = Number(variant.query_genome_pos);
+          const rPos = Number(variant.ref_source_pos);
+          if (Number.isFinite(qPos) && qPos >= row.range.start && qPos <= row.range.end) {
+            const x = xFor(qPos, row.range, plotLeft, plotWidth);
+            markers.push(`<circle class="detail-variant ${vClass}" cx="${x}" cy="${y - 15}" r="4"><title>${esc(variant.type)} ${esc(row.track.name)}:${qPos}</title></circle>`);
+          }
+          if (Number.isFinite(rPos) && rPos >= refRow.range.start && rPos <= refRow.range.end) {
+            const x = xFor(rPos, refRow.range, plotLeft, plotWidth);
+            markers.push(`<circle class="detail-variant ${vClass}" cx="${x}" cy="${refY - 15}" r="4"><title>${esc(variant.type)} ref:${rPos}</title></circle>`);
+          }
+        }
+      }
+
+      root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg></div>`;
     }
     function renderOutputs() {
       const rows = ['<tr><th>文件名</th><th>描述</th><th>路径</th></tr>'];
