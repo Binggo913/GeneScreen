@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 from datetime import datetime
+from html import escape
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -784,191 +785,458 @@ def write_static_report(
 
 
 def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
-    embedded = json.dumps(payload, ensure_ascii=False)
-    title = payload.get("input", {}).get("id") or "GeneScreen Report"
-    return f"""<!DOCTYPE html>
+    embedded = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    title = str(payload.get("input", {}).get("id") or "GeneScreen Report")
+    title_html = escape(title)
+    template = r"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="genescreen-report-schema" content="multi_query_report.v1">
-  <title>{title} - GeneScreen</title>
+  <title>__TITLE__ - GeneScreen Report</title>
   <style>
-    * {{ box-sizing: border-box; }}
-    body {{ margin: 0; font-family: Arial, 'Microsoft YaHei', sans-serif; color: #17202a; background: #f6f8fb; }}
-    header {{ padding: 18px 24px; background: #ffffff; border-bottom: 1px solid #d9e0ea; }}
-    h1 {{ margin: 0 0 6px; font-size: 22px; font-weight: 700; }}
-    .subtle {{ color: #5d6979; font-size: 13px; }}
-    main {{ padding: 18px 24px 32px; max-width: 1500px; margin: 0 auto; }}
-    .cards {{ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }}
-    .card, .panel {{ background: #fff; border: 1px solid #d9e0ea; border-radius: 6px; }}
-    .card {{ padding: 14px 16px; min-height: 96px; }}
-    .card h2, .panel h2 {{ margin: 0 0 10px; font-size: 15px; }}
-    .metrics {{ display: flex; flex-wrap: wrap; gap: 14px; }}
-    .metric strong {{ display: block; font-size: 22px; line-height: 1.1; }}
-    .metric span {{ color: #5d6979; font-size: 12px; }}
-    .panel {{ padding: 14px 16px; margin-bottom: 14px; }}
-    .overview-row, .track-row {{ display: grid; grid-template-columns: 180px 1fr; gap: 12px; align-items: center; min-height: 44px; }}
-    .track-label {{ font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-    .lane {{ position: relative; height: 34px; border-left: 1px solid #c6d0dd; border-right: 1px solid #c6d0dd; background: linear-gradient(#fff, #fff) padding-box; }}
-    .candidate {{ position: absolute; top: 9px; height: 16px; min-width: 3px; background: #5b8def; border: 1px solid #2e63c7; cursor: pointer; }}
-    .candidate.best {{ background: #27ae60; border-color: #1e874b; }}
-    .candidate.selected {{ outline: 2px solid #111827; outline-offset: 1px; }}
-    .detail-layout {{ display: grid; grid-template-columns: 260px 1fr; gap: 14px; }}
-    .controls {{ border-right: 1px solid #e0e5ec; padding-right: 12px; }}
-    .control-row {{ display: grid; grid-template-columns: 1fr 32px 32px; gap: 6px; margin-bottom: 8px; align-items: center; }}
-    select, button {{ height: 30px; border: 1px solid #bcc7d5; border-radius: 4px; background: #fff; }}
-    button {{ cursor: pointer; }}
-    .track-stack {{ position: relative; min-height: 180px; }}
-    .track-row {{ border: 1px solid #dde4ee; border-radius: 6px; background: #fbfcfe; padding: 8px; margin-bottom: 8px; cursor: grab; }}
-    .track-row.dragging {{ opacity: .5; }}
-    svg.links {{ position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }}
-    .empty {{ color: #6b7280; padding: 18px; }}
-    @media (max-width: 900px) {{
-      main {{ padding: 12px; }}
-      .cards, .detail-layout {{ grid-template-columns: 1fr; }}
-      .overview-row, .track-row {{ grid-template-columns: 120px 1fr; }}
-      .controls {{ border-right: 0; padding-right: 0; }}
-    }}
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+      line-height: 1.6;
+      color: #333;
+      background: #f5f5f5;
+      padding: 20px;
+    }
+    .container {
+      max-width: 1320px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+    }
+    .header-content {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: flex-start;
+    }
+    .header h1 { font-size: 24px; margin-bottom: 10px; }
+    .subtitle {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 12px;
+      opacity: 0.95;
+      font-size: 14px;
+    }
+    .gen-time { margin-top: 8px; font-size: 13px; opacity: 0.85; }
+    .mode-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      background: rgba(255,255,255,0.22);
+      color: white;
+    }
+    .json-badge {
+      display: inline-block;
+      color: rgba(255,255,255,0.92);
+      border: 1px solid rgba(255,255,255,0.35);
+      border-radius: 6px;
+      padding: 5px 10px;
+      font-size: 12px;
+      text-decoration: none;
+    }
+    .section { padding: 25px 30px; border-bottom: 1px solid #eee; }
+    .section:last-child { border-bottom: none; }
+    .section h2 {
+      font-size: 18px;
+      color: #667eea;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    .section h3 { font-size: 14px; color: #666; margin: 15px 0 10px; }
+    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+    .info-table td { padding: 10px 15px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .info-table .label { width: 150px; font-weight: 600; color: #666; background: #f9f9f9; }
+    .info-table .value { color: #333; }
+    .info-table code {
+      background: #f0f0f0;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      word-break: break-all;
+    }
+    .stats-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; text-align: center; }
+    .stats-table th {
+      padding: 12px 15px;
+      background: #f9f9f9;
+      font-weight: 600;
+      color: #666;
+      border-bottom: 2px solid #eee;
+    }
+    .stats-table td {
+      padding: 15px;
+      font-size: 18px;
+      font-weight: 500;
+      color: #333;
+      border-bottom: 1px solid #eee;
+    }
+    .file-table { width: 100%; border-collapse: collapse; }
+    .file-table th, .file-table td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
+    .file-table th { background: #f9f9f9; font-weight: 600; color: #666; }
+    .path-code {
+      font-size: 11px;
+      color: #666;
+      word-break: break-all;
+      background: #f5f5f5;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .file-na { color: #999; font-size: 12px; }
+    .visualization-section { background: #fafafa; }
+    .viz-container {
+      padding: 20px;
+      background: white;
+      border: 1px solid #eee;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .overview-grid, .track-row {
+      display: grid;
+      grid-template-columns: minmax(180px, 260px) minmax(520px, 1fr);
+      gap: 14px;
+      align-items: center;
+    }
+    .overview-grid { gap: 10px 14px; min-width: 760px; }
+    .track-label {
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: #333;
+    }
+    .track-subtext { font-size: 12px; color: #777; margin-top: 2px; font-weight: 400; }
+    .lane {
+      position: relative;
+      height: 38px;
+      border: 1px solid #e1e5ee;
+      border-left: 3px solid #667eea;
+      border-radius: 5px;
+      background: linear-gradient(180deg, #fff 0%, #fbfcff 100%);
+    }
+    .candidate {
+      position: absolute;
+      top: 10px;
+      height: 16px;
+      min-width: 3px;
+      background: #5b8def;
+      border: 1px solid #2e63c7;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .candidate:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(46,99,199,.25); }
+    .candidate.best { background: #27ae60; border-color: #1e874b; }
+    .candidate.selected { outline: 2px solid #333; outline-offset: 2px; }
+    .candidate-ref { background: #667eea; border-color: #5364c9; left: 8%; width: 84%; }
+    .viz-legend-note {
+      margin-top: 15px;
+      padding: 10px 15px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      font-size: 13px;
+      color: #666;
+    }
+    .detail-layout {
+      display: grid;
+      grid-template-columns: 300px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .controls {
+      background: #fff;
+      border: 1px solid #eee;
+      border-radius: 8px;
+      padding: 14px;
+    }
+    .control-row {
+      display: grid;
+      grid-template-columns: 1fr 32px 32px;
+      gap: 6px;
+      margin-bottom: 10px;
+      align-items: center;
+    }
+    select, button {
+      height: 32px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: #fff;
+      color: #333;
+    }
+    select { width: 100%; padding: 0 8px; }
+    button { cursor: pointer; color: #667eea; font-weight: 600; }
+    button:hover { background: #f3f0ff; }
+    .track-stack { min-width: 760px; }
+    .track-row {
+      border: 1px solid #eee;
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      margin-bottom: 10px;
+      cursor: grab;
+    }
+    .track-row.dragging { opacity: .55; }
+    .empty { color: #777; padding: 18px; }
+    .copy-toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      background: #333;
+      color: white;
+      padding: 10px 20px;
+      border-radius: 4px;
+      display: none;
+      z-index: 1000;
+    }
+    @media (max-width: 900px) {
+      body { padding: 10px; }
+      .header-content, .detail-layout { display: block; }
+      .section { padding: 20px 16px; }
+      .overview-grid, .track-row { grid-template-columns: 140px minmax(420px, 1fr); }
+      .controls { margin-bottom: 14px; }
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>{title}</h1>
-    <div class="subtle">GeneScreen multi-query static report</div>
-  </header>
-  <main>
-    <section class="cards">
-      <div class="card"><h2>输入与候选</h2><div id="inputMetrics" class="metrics"></div></div>
-      <div class="card"><h2>当前组合统计</h2><div id="variantMetrics" class="metrics"></div></div>
-    </section>
-    <section class="panel">
-      <h2>Overview</h2>
-      <div id="overview"></div>
-    </section>
-    <section class="panel">
-      <h2>Detail</h2>
+<div class="container">
+  <div class="header">
+    <div class="header-content">
+      <div>
+        <h1>__TITLE__</h1>
+        <div class="subtitle">
+          <span class="mode-badge" id="modeBadge">GeneScreen</span>
+          <span>1 ref + N query alignment report</span>
+        </div>
+        <div class="gen-time" id="generatedAt"></div>
+      </div>
+      <a class="json-badge" href="data.json">data.json</a>
+    </div>
+  </div>
+
+  <div class="section input-section">
+    <h2>初始化</h2>
+    <table class="info-table" id="initTable"></table>
+  </div>
+
+  <div class="section">
+    <h2>输入文件</h2>
+    <table class="file-table" id="genomeTable"></table>
+  </div>
+
+  <div class="section stats-section">
+    <h2>结果统计</h2>
+    <table class="stats-table">
+      <thead><tr id="statsHead"></tr></thead>
+      <tbody><tr id="statsBody"></tr></tbody>
+    </table>
+  </div>
+
+  <div class="section overview-section visualization-section">
+    <h2>宏观比对图</h2>
+    <div class="viz-container">
+      <div id="overview" class="overview-grid"></div>
+      <div class="viz-legend-note">
+        <p>绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 <code>data.json</code>，切换显示不会重新计算。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section visualization-section">
+    <h2>局部比对图</h2>
+    <div class="viz-container">
       <div class="detail-layout">
         <div id="controls" class="controls"></div>
         <div id="detail" class="track-stack"></div>
       </div>
-    </section>
-  </main>
-  <script id="embedded-report-data" type="application/json">{embedded}</script>
+      <div class="viz-legend-note">
+        <p>左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section output-section">
+    <h2>结果文件</h2>
+    <table class="file-table" id="outputTable"></table>
+  </div>
+</div>
+<div id="copyToast" class="copy-toast">已复制到剪贴板</div>
+
+  <script id="embedded-report-data" type="application/json">__EMBEDDED_DATA__</script>
   <script>
     let reportData = JSON.parse(document.getElementById('embedded-report-data').textContent);
-    fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => {{ reportData = data; init(); }}).catch(init);
+    fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => { reportData = data; init(); }).catch(init);
 
-    const state = {{ selected: {{}}, order: [] }};
-    function init() {{
-      state.selected = Object.assign({{}}, reportData.default_selection.selected_candidates || {{}});
+    const state = { selected: {}, order: [] };
+    function esc(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    }
+    function init() {
+      state.selected = Object.assign({}, reportData.default_selection.selected_candidates || {});
       state.order = (reportData.default_selection.track_order || []).slice();
-      renderCards();
+      renderHeader();
+      renderInit();
+      renderGenomes();
+      renderStats();
       renderOverview();
       renderControls();
       renderDetail();
-    }}
-    function queryIds() {{ return (reportData.overview && reportData.overview.query_order) || []; }}
-    function candidateById(queryId, candidateId) {{
+      renderOutputs();
+    }
+    function queryIds() { return (reportData.overview && reportData.overview.query_order) || []; }
+    function trackById(trackId) {
+      return (reportData.tracks || []).find(t => t.track_id === trackId) || { name: trackId, role: 'query_genome' };
+    }
+    function candidateById(queryId, candidateId) {
       return (reportData.candidates[queryId] || []).find(c => c.candidate_id === candidateId);
-    }}
-    function renderCards() {{
-      const s = reportData.statistics || {{}};
-      const variants = (s.selected_combination && s.selected_combination.variants) || {{}};
-      document.getElementById('inputMetrics').innerHTML = [
-        metric('Genomes', s.genome_count || 0),
-        metric('Queries', s.query_count || 0),
-        metric('Candidates', s.total_candidate_count || 0)
-      ].join('');
-      document.getElementById('variantMetrics').innerHTML = [
-        metric('Links', (s.selected_combination && s.selected_combination.link_count) || 0),
-        metric('SNP', variants.SNP || 0),
-        metric('INS', variants.INS || 0),
-        metric('DEL', variants.DEL || 0)
-      ].join('');
-    }}
-    function metric(label, value) {{ return `<div class="metric"><strong>${{value}}</strong><span>${{label}}</span></div>`; }}
-    function renderOverview() {{
+    }
+    function renderHeader() {
+      document.getElementById('modeBadge').textContent = reportData.mode || 'GeneScreen';
+      document.getElementById('generatedAt').textContent = reportData.generated_at ? `生成时间：${reportData.generated_at}` : '';
+    }
+    function renderInit() {
+      const input = reportData.input || {};
+      const params = reportData.parameters || {};
+      const rows = [
+        ['输入 ID', `<code>${esc(input.id || '-')}</code>`],
+        ['模式', esc(reportData.mode || '-')],
+        ['序列长度', input.sequence_length ? `${Number(input.sequence_length).toLocaleString()} bp` : '-'],
+        ['Identity 阈值', params.identity != null ? `${params.identity}%` : '-'],
+        ['最小比对长度', params.min_aln_len != null ? `${params.min_aln_len} bp` : '-'],
+        ['Pairwise Top-N', params.pairwise_all ? '全量候选' : (params.candidate_limit ?? '-')],
+        ['查询上游延伸', `${params.query_upstream || 0} bp`],
+        ['查询下游延伸', `${params.query_downstream || 0} bp`]
+      ];
+      document.getElementById('initTable').innerHTML = rows.map(([k, v]) => `<tr><td class="label">${k}</td><td class="value">${v}</td></tr>`).join('');
+    }
+    function renderGenomes() {
+      const ref = (reportData.genomes && reportData.genomes.ref) || {};
+      const queries = (reportData.genomes && reportData.genomes.queries) || [];
+      const rows = [
+        '<tr><th>类型</th><th>名称</th><th>FASTA</th><th>注释</th></tr>',
+        `<tr><td>参考</td><td>${esc(ref.name || '-')}</td><td><code class="path-code">${esc(ref.source_fasta || ref.artifact_fasta || '-')}</code></td><td><code class="path-code">${esc(ref.source_gff || ref.artifact_gff || '-')}</code></td></tr>`
+      ];
+      for (const q of queries) {
+        rows.push(`<tr><td>查询</td><td>${esc(q.name || q.genome_id)}</td><td><code class="path-code">${esc(q.source_fasta || '-')}</code></td><td>${q.has_annotation ? `<code class="path-code">${esc(q.source_gff || '-')}</code>` : '<span class="file-na">未使用注释</span>'}</td></tr>`);
+      }
+      document.getElementById('genomeTable').innerHTML = rows.join('');
+    }
+    function renderStats() {
+      const s = reportData.statistics || {};
+      const variants = (s.selected_combination && s.selected_combination.variants) || {};
+      const metrics = [
+        ['基因组', s.genome_count || 0],
+        ['查询基因组', s.query_count || 0],
+        ['候选片段', s.total_candidate_count || 0],
+        ['可见连接', (s.selected_combination && s.selected_combination.link_count) || 0],
+        ['SNP', variants.SNP || 0],
+        ['INS', variants.INS || 0],
+        ['DEL', variants.DEL || 0]
+      ];
+      document.getElementById('statsHead').innerHTML = metrics.map(m => `<th>${m[0]}</th>`).join('');
+      document.getElementById('statsBody').innerHTML = metrics.map(m => `<td>${m[1]}</td>`).join('');
+    }
+    function renderOverview() {
       const root = document.getElementById('overview');
       root.innerHTML = '';
-      for (const qid of queryIds()) {{
-        const track = reportData.tracks.find(t => t.track_id === qid) || {{ name: qid }};
+      for (const qid of queryIds()) {
+        const track = trackById(qid);
         const row = document.createElement('div');
-        row.className = 'overview-row';
-        row.innerHTML = `<div class="track-label" title="${{track.name}}">${{track.name}}</div><div class="lane"></div>`;
+        row.className = 'overview-track';
+        row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${(reportData.candidates[qid] || []).length} candidates</div></div><div class="lane"></div>`;
         const lane = row.querySelector('.lane');
         const candidates = reportData.candidates[qid] || [];
         const maxEnd = Math.max(...candidates.map(c => c.query_end || 1), 1);
-        for (const candidate of candidates) {{
+        for (const candidate of candidates) {
           const el = document.createElement('div');
           el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
           const start = Math.max(0, ((candidate.query_start || 1) / maxEnd) * 100);
           const end = Math.max(start + 0.5, ((candidate.query_end || candidate.query_start || 1) / maxEnd) * 100);
-          const region = candidate.query_region_start ? `${{candidate.query_chr}}:${{candidate.query_region_start}}-${{candidate.query_region_end}}` : `${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`;
-          const match = candidate.query_match_start ? ` match=${{candidate.query_match_start}}-${{candidate.query_match_end}}` : '';
-          el.style.left = `${{Math.min(start, 99)}}%`;
-          el.style.width = `${{Math.max(0.5, Math.min(end - start, 100 - start))}}%`;
-          el.title = `${{candidate.candidate_id}} ${{region}}${{match}}`;
-          el.onclick = () => {{ state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); }};
+          const region = candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`;
+          const match = candidate.query_match_start ? ` match=${candidate.query_match_start}-${candidate.query_match_end}` : '';
+          el.style.left = `${Math.min(start, 99)}%`;
+          el.style.width = `${Math.max(0.5, Math.min(end - start, 100 - start))}%`;
+          el.title = `${candidate.candidate_id} ${region}${match}`;
+          el.onclick = () => { state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); };
           lane.appendChild(el);
-        }}
+        }
         root.appendChild(row);
-      }}
-    }}
-    function renderControls() {{
+      }
+    }
+    function renderControls() {
       const root = document.getElementById('controls');
-      root.innerHTML = '';
-      for (const qid of queryIds()) {{
-        const track = reportData.tracks.find(t => t.track_id === qid) || {{ name: qid }};
+      root.innerHTML = '<h3>候选切换</h3>';
+      for (const qid of queryIds()) {
+        const track = trackById(qid);
         const row = document.createElement('div');
         row.className = 'control-row';
-        const options = (reportData.candidates[qid] || []).map(c => `<option value="${{c.candidate_id}}" ${{state.selected[qid] === c.candidate_id ? 'selected' : ''}}>${{track.name}} · ${{c.candidate_id}}</option>`).join('');
-        row.innerHTML = `<select>${{options}}</select><button title="上移">↑</button><button title="下移">↓</button>`;
-        row.querySelector('select').onchange = e => {{ state.selected[qid] = e.target.value; renderOverview(); renderDetail(); }};
+        const options = (reportData.candidates[qid] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[qid] === c.candidate_id ? 'selected' : ''}>${esc(track.name)} · ${esc(c.candidate_id)}</option>`).join('');
+        row.innerHTML = `<select>${options}</select><button title="上移">↑</button><button title="下移">↓</button>`;
+        row.querySelector('select').onchange = e => { state.selected[qid] = e.target.value; renderOverview(); renderDetail(); };
         row.children[1].onclick = () => moveTrack(qid, -1);
         row.children[2].onclick = () => moveTrack(qid, 1);
         root.appendChild(row);
-      }}
-    }}
-    function moveTrack(trackId, delta) {{
+      }
+    }
+    function moveTrack(trackId, delta) {
       const index = state.order.indexOf(trackId);
       const target = index + delta;
       if (index <= 0 || target <= 0 || target >= state.order.length) return;
       state.order.splice(index, 1);
       state.order.splice(target, 0, trackId);
       renderDetail();
-    }}
-    function renderDetail() {{
+    }
+    function renderDetail() {
       const root = document.getElementById('detail');
       root.innerHTML = '';
-      if (!state.order.length) {{ root.innerHTML = '<div class="empty">No tracks</div>'; return; }}
-      for (const trackId of state.order) {{
-        const track = reportData.tracks.find(t => t.track_id === trackId) || {{ name: trackId, role: 'query_genome' }};
+      if (!state.order.length) { root.innerHTML = '<div class="empty">No tracks</div>'; return; }
+      for (const trackId of state.order) {
+        const track = trackById(trackId);
         const row = document.createElement('div');
         row.className = 'track-row';
         row.draggable = trackId !== 'ref';
         row.dataset.trackId = trackId;
         const candidate = trackId === 'ref' ? null : candidateById(trackId, state.selected[trackId]);
-        const region = candidate && candidate.query_region_start ? `${{candidate.query_chr}}:${{candidate.query_region_start}}-${{candidate.query_region_end}}` : null;
-        const label = candidate ? `${{track.name}} · ${{candidate.candidate_id}} · ${{region || `${{candidate.query_chr}}:${{candidate.query_start}}-${{candidate.query_end}}`}}` : `${{track.name}} · ref`;
-        row.innerHTML = `<div class="track-label" title="${{label}}">${{label}}</div><div class="lane"></div>`;
+        const region = candidate && candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : null;
+        const label = candidate ? `${track.name} · ${candidate.candidate_id} · ${region || `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`}` : `${track.name} · ref`;
+        row.innerHTML = `<div class="track-label" title="${esc(label)}">${esc(label)}<div class="track-subtext">${trackId === 'ref' ? 'reference source sequence' : 'query candidate track'}</div></div><div class="lane"></div>`;
         const lane = row.querySelector('.lane');
-        if (candidate) {{
+        if (trackId === 'ref') {
+          const marker = document.createElement('div');
+          marker.className = 'candidate candidate-ref selected';
+          lane.appendChild(marker);
+        } else if (candidate) {
           const marker = document.createElement('div');
           marker.className = 'candidate selected';
           marker.style.left = '8%';
           marker.style.width = '84%';
           lane.appendChild(marker);
-        }}
+        }
         wireDrag(row);
         root.appendChild(row);
-      }}
-    }}
-    function wireDrag(row) {{
-      row.addEventListener('dragstart', e => {{ row.classList.add('dragging'); e.dataTransfer.setData('text/plain', row.dataset.trackId); }});
+      }
+    }
+    function wireDrag(row) {
+      row.addEventListener('dragstart', e => { row.classList.add('dragging'); e.dataTransfer.setData('text/plain', row.dataset.trackId); });
       row.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.addEventListener('dragover', e => e.preventDefault());
-      row.addEventListener('drop', e => {{
+      row.addEventListener('drop', e => {
         e.preventDefault();
         const dragged = e.dataTransfer.getData('text/plain');
         const target = row.dataset.trackId;
@@ -977,9 +1245,18 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const index = state.order.indexOf(target);
         state.order.splice(index, 0, dragged);
         renderDetail();
-      }});
-    }}
+      });
+    }
+    function renderOutputs() {
+      const rows = ['<tr><th>文件名</th><th>描述</th><th>路径</th></tr>'];
+      rows.push('<tr><td><a href="data.json">data.json</a></td><td>新版报告结构化数据</td><td><code class="path-code">report/data.json</code></td></tr>');
+      for (const f of reportData.extra_files || []) {
+        rows.push(`<tr><td>${esc(f.label || '-')}</td><td>${esc(f.description || '')}</td><td><code class="path-code">${esc(f.path || '')}</code></td></tr>`);
+      }
+      document.getElementById('outputTable').innerHTML = rows.join('');
+    }
   </script>
 </body>
 </html>
 """
+    return template.replace("__TITLE__", title_html).replace("__EMBEDDED_DATA__", embedded)
