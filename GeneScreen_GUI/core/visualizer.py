@@ -20,6 +20,11 @@ import base64
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
+try:
+    from .multi_query_result import build_single_query_payload, write_static_report
+except ImportError:
+    from core.multi_query_result import build_single_query_payload, write_static_report
+
 
 def _is_frozen() -> bool:
     """判断是否在打包环境中运行"""
@@ -1199,6 +1204,36 @@ class BaseVisualizer:
     def visualize(self, result):
         """可视化入口，子类实现具体逻辑"""
         raise NotImplementedError
+
+    def _finalize_single_query_report(
+        self,
+        result,
+        mode,
+        ref_name="",
+        qry_name="",
+        identity=90,
+        genome_files=None,
+        legacy_report=None,
+        extra_files=None,
+    ):
+        """Write the shared N=1 multi-query payload and static report entry."""
+        payload = build_single_query_payload(
+            result=result,
+            output_dir=self.output_dir,
+            mode=mode,
+            ref_name=ref_name,
+            qry_name=qry_name,
+            identity=identity,
+            min_aln_len=self.min_aln_len,
+            genome_files=genome_files,
+            legacy_report=legacy_report,
+            extra_files=extra_files,
+        )
+        report_index = write_static_report(payload, self.output_dir, legacy_report)
+        result["multi_query_report"] = payload
+        result["report_data"] = os.path.join(self.output_dir, "report", "data.json")
+        result["report_index"] = report_index
+        return report_index
 
     def _escape_path_for_js(self, path):
         """转义路径用于 JavaScript，兼容 Windows 和 Linux"""
@@ -4625,7 +4660,18 @@ class GeneIDVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        return report_file
+        report_index = self._finalize_single_query_report(
+            result,
+            "gene_id",
+            ref_genome,
+            qry_genome,
+            identity,
+            genome_files,
+            report_file,
+            output_files,
+        )
+        print(f"[INFO] 已生成新框架报告: {report_index}")
+        return report_index
 
 
 class LocationVisualizer(BaseVisualizer):
@@ -4722,7 +4768,18 @@ class LocationVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        return report_file
+        report_index = self._finalize_single_query_report(
+            result,
+            "location",
+            ref_genome,
+            qry_genome,
+            identity,
+            genome_files,
+            report_file,
+            output_files,
+        )
+        print(f"[INFO] 已生成新框架报告: {report_index}")
+        return report_index
 
 
 class SequenceVisualizer(BaseVisualizer):
@@ -4829,7 +4886,18 @@ class SequenceVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        return report_file
+        report_index = self._finalize_single_query_report(
+            result,
+            "sequence",
+            ref_genome,
+            qry_genome,
+            identity,
+            genome_files,
+            report_file,
+            output_files,
+        )
+        print(f"[INFO] 已生成新框架报告: {report_index}")
+        return report_index
 
 
 # ============================================================

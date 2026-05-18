@@ -163,6 +163,13 @@ The implementation should treat the current two-genome comparison as the `1 ref 
   * Detail supports selected candidate combination, per-track candidate switching, drag/reorder, optional annotations, and reverse-strand rendering.
   * Statistics cards update for `1 ref + N query` and selected detail combinations.
 
+## Progress Log
+
+* Phase 1 foundation:
+  * Added shared N=1 report payload generation for current two-genome runs in CLI and GUI.
+  * Current reports now emit `report/data.json` and `report/index.html` while keeping legacy HTML and pair artifacts available.
+  * GUI history sync prefers the new `report/index.html` path when present.
+
 ## Acceptance Criteria
 
 * [ ] Gene ID mode accepts one ref and two or more query genomes in GUI and CLI.

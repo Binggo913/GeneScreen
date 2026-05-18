@@ -411,12 +411,20 @@ class HistoryPage(QWidget):
             for run_dir in mode_dir.iterdir():
                 if not run_dir.is_dir():
                     continue
-                for report_file in run_dir.glob("*.report.html"):
+                new_report = run_dir / "report" / "index.html"
+                if new_report.exists():
+                    report_files = [new_report]
+                else:
+                    report_files = list(run_dir.glob("*.report.html"))
+                for report_file in report_files:
                     report_path = os.path.normcase(os.path.normpath(str(report_file)))
                     if report_path in existing_reports:
                         continue
-                    filename = report_file.name
-                    input_value = filename[:-len(".report.html")] if filename.endswith(".report.html") else report_file.stem
+                    if report_file.name == "index.html" and report_file.parent.name == "report":
+                        input_value = run_dir.name
+                    else:
+                        filename = report_file.name
+                        input_value = filename[:-len(".report.html")] if filename.endswith(".report.html") else report_file.stem
                     if mode == "location":
                         match = re.match(r"^(\w+)_([0-9]+)_([0-9]+)$", input_value)
                         if match:
