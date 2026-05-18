@@ -344,7 +344,7 @@ class SequencePage(QWidget):
         for seq in sequences:
             seq_id = seq["seq_id"]
             safe_name = self._sanitize_path_segment(seq_id) or "sequence"
-            item_output_dir = output_dir if not multi_mode else f"{output_dir}_{safe_name}"
+            item_output_dir = output_dir if not multi_mode else os.path.join(output_dir, safe_name)
             os.makedirs(item_output_dir, exist_ok=True)
             history_id = db.add_history(
                 mode="sequence",
@@ -376,7 +376,7 @@ class SequencePage(QWidget):
         if multi_mode:
             def output_dir_builder(seq: dict) -> str:
                 safe_name = self._sanitize_path_segment(seq["seq_id"]) or "sequence"
-                return f"{output_dir}_{safe_name}"
+                return os.path.join(output_dir, safe_name)
         
         self.analysis_thread = SequenceAnalysisThread(processor, sequences, output_dir_builder=output_dir_builder)
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))

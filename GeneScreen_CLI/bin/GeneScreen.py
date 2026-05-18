@@ -13,6 +13,7 @@ GeneScreen 1.0 - 基因组比对与变异分析工具
 import os
 import subprocess
 import argparse
+import re
 from pathlib import Path
 
 from pyfaidx import Fasta
@@ -46,6 +47,11 @@ def ensure_blast_db(fasta_path):
         if not run_cmd(cmd, "创建 BLAST 数据库失败"):
             return False
     return True
+
+
+def sanitize_path_segment(text):
+    """清理用于输出子目录名的输入 ID。"""
+    return re.sub(r'[<>:"/\\|?*]', "_", str(text)).strip()
 
 
 # ======================= 序列提取模块 =======================
@@ -736,6 +742,11 @@ class GeneIDProcessor:
 
         return result
 
+    def set_output_dir(self, output_dir):
+        self.output_dir = output_dir
+        self.extractor.output_dir = output_dir
+        self.aligner.output_dir = output_dir
+
 
 class LocationProcessor:
     """Location 模式处理器"""
@@ -793,6 +804,11 @@ class LocationProcessor:
 
         return result
 
+    def set_output_dir(self, output_dir):
+        self.output_dir = output_dir
+        self.extractor.output_dir = output_dir
+        self.aligner.output_dir = output_dir
+
 
 class SequenceProcessor:
     """Sequence 模式处理器"""
@@ -828,14 +844,24 @@ class SequenceProcessor:
         print(f"[INFO] 共解析到 {len(sequences)} 个序列")
         
         results = []
+        base_output_dir = self.output_dir
+        multi_mode = len(sequences) > 1
         for i, seq in enumerate(sequences):
             seq_id = seq["seq_id"]
             sequence = seq["sequence"]
             print(f"\n[INFO] 处理序列 {seq_id} ({i+1}/{len(sequences)})")
-            
+
+            if multi_mode:
+                item_output_dir = os.path.join(base_output_dir, sanitize_path_segment(seq_id) or "sequence")
+                os.makedirs(item_output_dir, exist_ok=True)
+                self.set_output_dir(item_output_dir)
+
             result = self._process_single(seq_id, sequence)
             if result:
                 results.append(result)
+
+        if multi_mode:
+            self.set_output_dir(base_output_dir)
         
         print(f"\n[INFO] 完成 {len(results)}/{len(sequences)} 个序列")
         return results[-1] if results else None
@@ -913,6 +939,10 @@ class SequenceProcessor:
                 sequences.append({"seq_id": current_id, "sequence": seq_str})
         
         return sequences
+
+    def set_output_dir(self, output_dir):
+        self.output_dir = output_dir
+        self.aligner.output_dir = output_dir
 
 
 # ======================= 主程序 =======================
@@ -1058,7 +1088,12 @@ def main():
             # 直接使用命令行参数
             gene_ids = args.gid
 
+        multi_mode = len(gene_ids) > 1
         for gene_id in gene_ids:
+            if multi_mode:
+                item_output_dir = os.path.join(args.output, sanitize_path_segment(gene_id) or "gene")
+                os.makedirs(item_output_dir, exist_ok=True)
+                processor.set_output_dir(item_output_dir)
             processor.process(gene_id)
 
     elif args.loc:
@@ -1079,7 +1114,6 @@ def main():
                                         min_aln_len=args.min_aln_len, merge_gap=args.merge_gap)
 
         # 判断是文件还是区域字符串列表
-        import re
         locations = []
         
         if len(args.loc) == 1 and os.path.exists(args.loc[0]):
@@ -1114,7 +1148,13 @@ def main():
         if not locations:
             raise ValueError("未找到有效的位置输入")
         
+        multi_mode = len(locations) > 1
         for loc in locations:
+            if multi_mode:
+                loc_name = loc['name'] or f"{loc['chrom']}_{loc['start']}_{loc['end']}"
+                item_output_dir = os.path.join(args.output, sanitize_path_segment(loc_name) or "location")
+                os.makedirs(item_output_dir, exist_ok=True)
+                processor.set_output_dir(item_output_dir)
             processor.process(loc['chrom'], loc['start'], loc['end'], loc['name'])
 
     print(f"\n[INFO] 处理完成，结果保存在: {args.output}")

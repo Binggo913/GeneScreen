@@ -765,7 +765,7 @@ class GeneIDPage(QWidget):
         self._last_report_path = ""
         for gene_id in gene_ids:
             safe_id = self._sanitize_path_segment(gene_id) or "gene"
-            item_output_dir = output_dir if not multi_mode else f"{output_dir}_{safe_id}"
+            item_output_dir = output_dir if not multi_mode else os.path.join(output_dir, safe_id)
             os.makedirs(item_output_dir, exist_ok=True)
             history_id = db.add_history(
                 mode="gene_id",

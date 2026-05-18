@@ -301,7 +301,7 @@ class LocationPage(QWidget):
             loc_label = loc.get("label") or f"{loc['chrom']}:{loc['start']}-{loc['end']}"
             loc_tag = loc.get("file_tag") or f"{loc['chrom']}_{loc['start']}_{loc['end']}"
             safe_name = self._sanitize_path_segment(loc_tag) or "location"
-            item_output_dir = output_dir if not multi_mode else f"{output_dir}_{safe_name}"
+            item_output_dir = output_dir if not multi_mode else os.path.join(output_dir, safe_name)
             os.makedirs(item_output_dir, exist_ok=True)
             history_id = db.add_history(
                 mode="location",
@@ -337,7 +337,7 @@ class LocationPage(QWidget):
             def output_dir_builder(loc: dict) -> str:
                 name = loc.get("file_tag") or f"{loc['chrom']}_{loc['start']}_{loc['end']}"
                 safe_name = self._sanitize_path_segment(name) or "location"
-                return f"{output_dir}_{safe_name}"
+                return os.path.join(output_dir, safe_name)
         self.analysis_thread = LocationAnalysisThread(processor, locations, output_dir_builder=output_dir_builder)
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
         self.analysis_thread.item_finished.connect(self._on_item_finished)
