@@ -1064,6 +1064,20 @@ class MainWindow(QMainWindow):
                 background: {panel_bg};
             }}
 
+            QListWidget[role="selectedQueryList"] {{
+                background: {input_bg};
+                color: {panel_text};
+                border: 1px solid {input_border};
+                border-radius: 6px;
+                padding: 4px;
+            }}
+
+            QListWidget[role="selectedQueryList"]::item {{
+                min-height: 26px;
+                padding: 4px 8px;
+                border-radius: 4px;
+            }}
+
             QCheckBox {{
                 color: {panel_text};
             }}
@@ -1331,6 +1345,34 @@ class MainWindow(QMainWindow):
             QDialog, QMessageBox {{
                 background: {panel_bg};
                 color: {panel_text};
+            }}
+
+            QDialog QWidget, QMessageBox QWidget {{
+                background: {panel_bg};
+                color: {panel_text};
+            }}
+
+            QDialog QLabel, QMessageBox QLabel {{
+                background: {panel_bg};
+                color: {panel_text};
+            }}
+
+            QMessageBox QPushButton, QDialog QPushButton {{
+                background: {secondary_button_bg};
+                color: {secondary_button_text};
+                border: 1px solid {secondary_button_border};
+                border-radius: 6px;
+                padding: 6px 18px;
+                min-width: 80px;
+            }}
+
+            QMessageBox QPushButton:hover, QDialog QPushButton:hover {{
+                background: {secondary_button_hover};
+                border-color: {secondary_button_text};
+            }}
+
+            QMessageBox QPushButton:pressed, QDialog QPushButton:pressed {{
+                background: {secondary_button_pressed};
             }}
             
             /* 状态栏 */

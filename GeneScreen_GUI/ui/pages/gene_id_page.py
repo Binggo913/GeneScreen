@@ -227,14 +227,6 @@ class GeneIDPage(QWidget):
         batch_header.addWidget(batch_label)
         batch_header.addStretch()
 
-        import_gene_ids_btn = QPushButton("从文件导入")
-        import_gene_ids_btn.setProperty("secondary", True)
-        import_gene_ids_btn.setProperty("compactAction", True)
-        import_gene_ids_btn.setMinimumWidth(132)
-        import_gene_ids_btn.setFixedHeight(38)
-        import_gene_ids_btn.clicked.connect(self._import_gene_ids_from_file)
-        batch_header.addWidget(import_gene_ids_btn)
-        
         # Gene list 路径显示（可点击打开）
         self.gene_list_path_label = QLabel("")
         self.gene_list_path_label.setProperty("role", "muted")
@@ -667,27 +659,6 @@ class GeneIDPage(QWidget):
             lines.append(second)
         lines.append("...")
         self.batch_input.setPlaceholderText("\n".join(lines))
-
-    def _import_gene_ids_from_file(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择 Gene ID 文件",
-            "",
-            "文本文件 (*.txt *.list *.tsv *.csv);;所有文件 (*)"
-        )
-        if not path:
-            return
-        try:
-            with open(path, "r", encoding="utf-8-sig") as handle:
-                gene_ids = [line.strip() for line in handle if line.strip()]
-        except Exception as exc:
-            QMessageBox.warning(self, "错误", f"读取 Gene ID 文件失败: {exc}")
-            return
-        if not gene_ids:
-            QMessageBox.warning(self, "提示", "文件中未读取到 Gene ID")
-            return
-        self.batch_input.setPlainText("\n".join(gene_ids))
-        self._resize_batch_gene_id_input()
 
     def _update_completer_matches(self, text: str):
         if text == self._last_filter_text:

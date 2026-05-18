@@ -206,6 +206,20 @@ QListWidget::item {
     padding: 4px 8px;
 }
 
+QListWidget[role="selectedQueryList"] {
+    background: white;
+    color: #303133;
+    border: 1px solid #dcdfe6;
+    border-radius: 6px;
+    padding: 4px;
+}
+
+QListWidget[role="selectedQueryList"]::item {
+    min-height: 26px;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
 QCheckBox {
     color: #303133;
     min-height: 28px;
@@ -430,14 +444,36 @@ QStatusBar {
 
 QDialog {
     background: white;
+    color: #303133;
 }
 
 QMessageBox {
     background: white;
+    color: #303133;
+}
+
+QDialog QWidget, QMessageBox QWidget {
+    background: white;
+    color: #303133;
+}
+
+QDialog QLabel, QMessageBox QLabel {
+    background: white;
+    color: #303133;
 }
 
 QMessageBox QPushButton {
+    background: #f3f4f6;
+    color: #667eea;
+    border: 1px solid #cfd6e4;
+    border-radius: 6px;
+    padding: 6px 18px;
     min-width: 80px;
+}
+
+QMessageBox QPushButton:hover {
+    background: #e9edf5;
+    border-color: #667eea;
 }
 
 /* ==================== 分组框样式 ==================== */

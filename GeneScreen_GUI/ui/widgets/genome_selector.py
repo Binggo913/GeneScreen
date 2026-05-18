@@ -8,11 +8,30 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QMessageBox, QListWidget, QListWidgetItem,
     QSizePolicy
 )
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import Signal, Qt, QSize
 
 from core import get_genome_manager, get_database
 
 from .analysis_layout import create_card
+
+
+class QuerySelectionList(QListWidget):
+    """Content-sized selected-query list used inside the input cards."""
+
+    def sizeHint(self):
+        width = super().sizeHint().width()
+        if self.count() == 0:
+            return QSize(width, 0)
+        frame = self.frameWidth() * 2
+        row_height = self.fontMetrics().height() + 12
+        rows = 0
+        for index in range(self.count()):
+            rows += max(self.sizeHintForRow(index), row_height)
+        spacing = max(0, self.spacing()) * max(0, self.count() - 1)
+        return QSize(width, frame + rows + spacing + 8)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
 
 
 class GenomeSelector(QWidget):
@@ -23,13 +42,15 @@ class GenomeSelector(QWidget):
     # 信号：注释版本选择改变
     annotation_changed = Signal(str, dict)  # (source, annotation_info)
     
-    def __init__(self, label: str = "基因组", show_manage_btn: bool = True, 
-                 show_annotation: bool = False, annotation_label: str = "注释版本", parent=None):
+    def __init__(self, label: str = "基因组", show_manage_btn: bool = True,
+                 show_annotation: bool = False, annotation_label: str = "注释版本",
+                 annotation_optional: bool = False, parent=None):
         super().__init__(parent)
         self.label_text = label
         self.show_manage_btn = show_manage_btn
         self.show_annotation = show_annotation
         self.annotation_label_text = annotation_label
+        self.annotation_optional = annotation_optional
         self._db = get_database()
         self._init_ui()
         self._load_genomes()
@@ -142,11 +163,13 @@ class GenomeSelector(QWidget):
             self.annotation_changed.emit("", {})
         else:
             self.ann_combo.setEnabled(True)
+            if self.annotation_optional:
+                self.ann_combo.addItem("-- 不使用注释 --", None)
             for ann in annotations:
                 self.ann_combo.addItem(ann["source"], ann)
-            # 默认选中第一个
-            if annotations:
-                self.annotation_changed.emit(annotations[0]["source"], annotations[0])
+            default_index = 1 if self.annotation_optional else 0
+            self.ann_combo.setCurrentIndex(default_index)
+            self.annotation_changed.emit(annotations[0]["source"], annotations[0])
     
     def _clear_annotations(self):
         """清空注释版本列表"""
@@ -246,9 +269,7 @@ class GenomeSelector(QWidget):
 
 class GenomePairSelector(QWidget):
     """基因组对选择器（参考 + 查询）"""
-    QUERY_LIST_ROW_HEIGHT = 36
-    QUERY_LIST_VERTICAL_PADDING = 18
-    
+
     # 信号
     ref_changed = Signal(str, dict)
     qry_changed = Signal(str, dict)
@@ -309,7 +330,13 @@ class GenomePairSelector(QWidget):
             query_card, query_parent_layout = create_card(self.query_title)
             layout.addWidget(query_card)
 
-        self.qry_selector = GenomeSelector("查询基因组", show_manage_btn=False)
+        self.qry_selector = GenomeSelector(
+            "查询基因组",
+            show_manage_btn=False,
+            show_annotation=True,
+            annotation_label="查询注释版本",
+            annotation_optional=True,
+        )
         self.qry_selector.genome_changed.connect(self._on_qry_changed)
         if not self.multi_query:
             query_parent_layout.addWidget(self.qry_selector)
@@ -319,13 +346,9 @@ class GenomePairSelector(QWidget):
             query_box.setSpacing(10)
             query_box.addWidget(self.qry_selector)
 
-            self.selected_qry_label = QLabel("已选查询基因组")
-            self.selected_qry_label.setProperty("role", "fieldLabel")
-
             action_layout = QHBoxLayout()
-            action_layout.setContentsMargins(80, 0, 0, 0)
+            action_layout.setContentsMargins(90, 0, 0, 0)
             action_layout.setSpacing(8)
-            action_layout.addWidget(self.selected_qry_label)
             action_layout.addStretch()
 
             self.add_qry_btn = QPushButton("添加")
@@ -335,6 +358,27 @@ class GenomePairSelector(QWidget):
             self.add_qry_btn.setFixedHeight(38)
             self.add_qry_btn.clicked.connect(self._add_current_query)
             action_layout.addWidget(self.add_qry_btn)
+            query_box.addLayout(action_layout)
+
+            self.selected_qry_row = QWidget()
+            selected_layout = QHBoxLayout(self.selected_qry_row)
+            selected_layout.setContentsMargins(0, 0, 0, 0)
+            selected_layout.setSpacing(10)
+
+            self.selected_qry_label = QLabel("已选查询")
+            self.selected_qry_label.setProperty("role", "fieldLabel")
+            self.selected_qry_label.setMinimumWidth(80)
+            self.selected_qry_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            selected_layout.addWidget(self.selected_qry_label)
+
+            self.qry_list = QuerySelectionList()
+            self.qry_list.setProperty("role", "selectedQueryList")
+            self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+            self.qry_list.setAlternatingRowColors(False)
+            self.qry_list.setWordWrap(True)
+            self.qry_list.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.qry_list.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            selected_layout.addWidget(self.qry_list, 1)
 
             self.remove_qry_btn = QPushButton("移除")
             self.remove_qry_btn.setProperty("secondary", True)
@@ -342,13 +386,8 @@ class GenomePairSelector(QWidget):
             self.remove_qry_btn.setMinimumWidth(112)
             self.remove_qry_btn.setFixedHeight(38)
             self.remove_qry_btn.clicked.connect(self._remove_selected_query)
-            action_layout.addWidget(self.remove_qry_btn)
-            query_box.addLayout(action_layout)
-
-            self.qry_list = QListWidget()
-            self.qry_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-            self.qry_list.setAlternatingRowColors(True)
-            query_box.addWidget(self.qry_list)
+            selected_layout.addWidget(self.remove_qry_btn)
+            query_box.addWidget(self.selected_qry_row)
             self._sync_selected_query_section()
 
             query_parent_layout.addLayout(query_box)
@@ -358,13 +397,9 @@ class GenomePairSelector(QWidget):
             return
         rows = self.qry_list.count()
         has_selection = rows > 0
-        self.selected_qry_label.setVisible(has_selection)
+        self.selected_qry_row.setVisible(has_selection)
         self.remove_qry_btn.setVisible(has_selection)
         self.qry_list.setVisible(has_selection)
-        self.qry_list.setMinimumHeight(
-            rows * self.QUERY_LIST_ROW_HEIGHT + self.QUERY_LIST_VERTICAL_PADDING
-            if has_selection else 0
-        )
         self.qry_list.updateGeometry()
         self.updateGeometry()
     
@@ -379,10 +414,25 @@ class GenomePairSelector(QWidget):
         genomes = self.get_qry_genomes()
         return genomes[0] if genomes else {}
 
+    def _selected_query_with_annotation(self) -> dict:
+        if not self.qry_selector:
+            return {}
+        genome = dict(self.qry_selector.get_selected_genome() or {})
+        if not genome:
+            return {}
+        annotation = self.qry_selector.get_selected_annotation()
+        if annotation:
+            genome["annotation_path"] = annotation.get("annotation_path", "")
+            genome["annotation_source"] = annotation.get("source", "")
+        elif self.qry_selector.show_annotation:
+            genome["annotation_path"] = ""
+            genome["annotation_source"] = ""
+        return genome
+
     def get_qry_genomes(self) -> list:
         """获取查询基因组列表。未添加列表时兼容返回当前下拉选择。"""
         if not self.multi_query:
-            genome = self.qry_selector.get_selected_genome()
+            genome = self._selected_query_with_annotation()
             return [genome] if genome else []
         genomes = []
         if hasattr(self, "qry_list"):
@@ -392,7 +442,7 @@ class GenomePairSelector(QWidget):
                 if genome:
                     genomes.append(genome)
         if not genomes:
-            genome = self.qry_selector.get_selected_genome()
+            genome = self._selected_query_with_annotation()
             if genome:
                 genomes.append(genome)
         return genomes
@@ -457,7 +507,7 @@ class GenomePairSelector(QWidget):
     def _add_current_query(self):
         if not self.multi_query:
             return
-        genome = self.qry_selector.get_selected_genome()
+        genome = self._selected_query_with_annotation()
         name = genome.get("name", "")
         if not name:
             QMessageBox.warning(self, "提示", "请选择要添加的查询基因组")
@@ -473,8 +523,8 @@ class GenomePairSelector(QWidget):
                 QMessageBox.information(self, "提示", "该查询基因组已添加")
                 return
         display_name = genome.get("display_name") or name
-        annotation_state = "有注释" if genome.get("annotation_path") else "无注释"
-        item = QListWidgetItem(f"{display_name} ({annotation_state})")
+        annotation_source = genome.get("annotation_source") or ("无注释" if not genome.get("annotation_path") else "注释")
+        item = QListWidgetItem(f"{display_name} · {annotation_source}")
         item.setData(Qt.UserRole, genome)
         self.qry_list.addItem(item)
         self._sync_selected_query_section()
