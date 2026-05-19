@@ -1128,7 +1128,9 @@ class BaseVisualizer:
 
     def _legacy_report_path(self, report_stem, report_suffix=None):
         if not report_suffix:
-            return os.path.join(self.output_dir, f"{report_stem}.report.html")
+            report_dir = os.path.join(self.output_dir, "report")
+            os.makedirs(report_dir, exist_ok=True)
+            return os.path.join(report_dir, f"{report_stem}.report.html")
         report_dir = os.path.join(self.output_dir, "report", "single_reports", report_suffix)
         os.makedirs(report_dir, exist_ok=True)
         return os.path.join(report_dir, f"{report_stem}.report.html")

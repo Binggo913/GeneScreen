@@ -458,7 +458,8 @@ class HistoryPage(QWidget):
                 if new_report.exists():
                     report_files = [new_report]
                 else:
-                    report_files = list(run_dir.glob("*.report.html"))
+                    report_files = list((run_dir / "report").glob("*.report.html"))
+                    report_files.extend(run_dir.glob("*.report.html"))
                 for report_file in report_files:
                     report_path = os.path.normcase(os.path.normpath(str(report_file)))
                     if report_path in existing_reports:
