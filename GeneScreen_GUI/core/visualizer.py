@@ -1305,6 +1305,10 @@ class BaseVisualizer:
                 )
         return legacy_reports
 
+    def _has_multiple_query_reports(self, result):
+        """Return True only when the current input has multiple query genomes."""
+        return len(result.get("query_results") or []) > 1
+
     def _finalize_single_query_report(
         self,
         result,
@@ -4773,7 +4777,7 @@ class GeneIDVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        if legacy_only:
+        if legacy_only or not self._has_multiple_query_reports(result):
             return report_file
         legacy_report = self._build_legacy_report_map(
             result, "gene_id", report_file, ref_genome, qry_genome, identity, input_source, genome_files
@@ -4899,7 +4903,7 @@ class LocationVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        if legacy_only:
+        if legacy_only or not self._has_multiple_query_reports(result):
             return report_file
         legacy_report = self._build_legacy_report_map(
             result, "location", report_file, ref_genome, qry_genome, identity, input_source, genome_files
@@ -5035,7 +5039,7 @@ class SequenceVisualizer(BaseVisualizer):
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
-        if legacy_only:
+        if legacy_only or not self._has_multiple_query_reports(result):
             return report_file
         legacy_report = self._build_legacy_report_map(
             result, "sequence", report_file, ref_genome, qry_genome, identity, input_source, genome_files
