@@ -126,6 +126,7 @@ class MainWindow(QMainWindow):
         self._resize_cursor_active = False
         app = QApplication.instance()
         self._base_app_stylesheet = app.styleSheet() if app else ""
+        self._theme_app_stylesheet_cache = {}
         self.setWindowFlags(self.windowFlags() | Qt.FramelessWindowHint)
         self.setAttribute(Qt.WA_TranslucentBackground, True)
         
@@ -1508,5 +1509,15 @@ class MainWindow(QMainWindow):
 
         app = QApplication.instance()
         if app:
-            app.setStyleSheet(f"{self._base_app_stylesheet}\n{theme_stylesheet}")
-        self.setStyleSheet(theme_stylesheet)
+            theme_key = "dark" if self._dark_mode else "light"
+            app_stylesheet = self._theme_app_stylesheet_cache.get(theme_key)
+            if app_stylesheet is None:
+                app_stylesheet = f"{self._base_app_stylesheet}\n{theme_stylesheet}"
+                self._theme_app_stylesheet_cache[theme_key] = app_stylesheet
+            if app.styleSheet() != app_stylesheet:
+                self.setUpdatesEnabled(False)
+                try:
+                    app.setStyleSheet(app_stylesheet)
+                finally:
+                    self.setUpdatesEnabled(True)
+                    self.update()
