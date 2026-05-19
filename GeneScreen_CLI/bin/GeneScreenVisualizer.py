@@ -11,6 +11,7 @@ import json
 import datetime
 import subprocess
 import base64
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
@@ -1102,6 +1103,106 @@ class BaseVisualizer:
     def visualize(self, result):
         """可视化入口，子类实现具体逻辑"""
         raise NotImplementedError
+
+    def _legacy_query_entry(self, result, genome_files, index, query_result):
+        query_entries = result.get("queries") or (genome_files or {}).get("queries") or []
+        if index < len(query_entries):
+            return query_entries[index] or {}
+        return {
+            "name": query_result.get("query_name") or f"query_{index + 1}",
+            "fasta": query_result.get("query_fasta"),
+            "gff": query_result.get("query_gff"),
+        }
+
+    def _legacy_query_safe(self, query_name, fallback):
+        safe = re.sub(r'[<>:"/\\|?*\s]+', "_", str(query_name or fallback)).strip("._")
+        return safe or fallback
+
+    def _legacy_report_suffix_for_result(self, result, genome_files):
+        query_results = result.get("query_results") or []
+        if not query_results:
+            return None
+        query_entry = self._legacy_query_entry(result, genome_files, 0, query_results[0])
+        query_name = query_entry.get("name") or query_results[0].get("query_name") or "query_1"
+        return self._legacy_query_safe(query_name, "query_1")
+
+    def _legacy_report_path(self, report_stem, report_suffix=None):
+        if not report_suffix:
+            return os.path.join(self.output_dir, f"{report_stem}.report.html")
+        report_dir = os.path.join(self.output_dir, "report", "single_reports", report_suffix)
+        os.makedirs(report_dir, exist_ok=True)
+        return os.path.join(report_dir, f"{report_stem}.report.html")
+
+    def _single_query_result(self, result, query_result, query_entry):
+        single_result = dict(result)
+        single_result.update(query_result)
+        single_result["query_results"] = [query_result]
+        single_result["queries"] = [query_entry]
+        single_result["pairwise_results"] = []
+        return single_result
+
+    def _single_query_genome_files(self, mode, genome_files, query_entry, query_result):
+        files = dict(genome_files or {})
+        query_fasta = query_entry.get("fasta") or query_result.get("query_fasta")
+        query_gff = query_entry.get("gff") or query_result.get("query_gff")
+        if mode == "sequence":
+            files["ref_fasta"] = query_fasta
+            files["ref_gff"] = query_gff
+        else:
+            files["qry_fasta"] = query_fasta
+            files["qry_gff"] = query_gff
+        files["queries"] = [query_entry]
+        return files
+
+    def _build_legacy_report_map(
+        self,
+        result,
+        mode,
+        first_report_file,
+        ref_genome="",
+        qry_genome="",
+        identity=90,
+        input_source=None,
+        genome_files=None,
+    ):
+        query_results = result.get("query_results") or []
+        if len(query_results) <= 1:
+            return first_report_file
+
+        legacy_reports = {}
+        for index, query_result in enumerate(query_results):
+            query_entry = self._legacy_query_entry(result, genome_files, index, query_result)
+            query_name = query_entry.get("name") or query_result.get("query_name") or f"query_{index + 1}"
+            query_safe = self._legacy_query_safe(query_name, f"query_{index + 1}")
+            if index == 0:
+                legacy_reports[query_safe] = first_report_file
+                continue
+
+            single_result = self._single_query_result(result, query_result, query_entry)
+            single_files = self._single_query_genome_files(mode, genome_files, query_entry, query_result)
+            if mode == "sequence":
+                legacy_reports[query_safe] = self.visualize(
+                    single_result,
+                    query_name,
+                    None,
+                    identity,
+                    input_source,
+                    single_files,
+                    legacy_only=True,
+                    report_suffix=query_safe,
+                )
+            else:
+                legacy_reports[query_safe] = self.visualize(
+                    single_result,
+                    ref_genome,
+                    query_name,
+                    identity,
+                    input_source,
+                    single_files,
+                    legacy_only=True,
+                    report_suffix=query_safe,
+                )
+        return legacy_reports
 
     def _finalize_single_query_report(
         self,
@@ -4438,7 +4539,17 @@ function showToast(msg) {
 class GeneIDVisualizer(BaseVisualizer):
     """Gene ID 模式可视化"""
 
-    def visualize(self, result, ref_genome="", qry_genome="", identity=90, input_source=None, genome_files=None):
+    def visualize(
+        self,
+        result,
+        ref_genome="",
+        qry_genome="",
+        identity=90,
+        input_source=None,
+        genome_files=None,
+        legacy_only=False,
+        report_suffix=None,
+    ):
         """
         生成 Gene ID 模式的报告
         
@@ -4528,11 +4639,19 @@ class GeneIDVisualizer(BaseVisualizer):
         html += self._get_html_footer()
         
         # 保存报告
-        report_file = os.path.join(self.output_dir, f"{gene_id}.report.html")
+        target_suffix = report_suffix
+        if target_suffix is None and len(result.get("query_results") or []) > 1:
+            target_suffix = self._legacy_report_suffix_for_result(result, genome_files)
+        report_file = self._legacy_report_path(gene_id, target_suffix)
         with open(report_file, "w", encoding="utf-8") as f:
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
+        if legacy_only:
+            return report_file
+        legacy_report = self._build_legacy_report_map(
+            result, "gene_id", report_file, ref_genome, qry_genome, identity, input_source, genome_files
+        )
         report_index = self._finalize_single_query_report(
             result,
             "gene_id",
@@ -4540,7 +4659,7 @@ class GeneIDVisualizer(BaseVisualizer):
             qry_genome,
             identity,
             genome_files,
-            report_file,
+            legacy_report,
             output_files,
         )
         print(f"[INFO] 已生成新框架报告: {report_index}")
@@ -4550,7 +4669,17 @@ class GeneIDVisualizer(BaseVisualizer):
 class LocationVisualizer(BaseVisualizer):
     """Location 模式可视化"""
 
-    def visualize(self, result, ref_genome="", qry_genome="", identity=90, input_source=None, genome_files=None):
+    def visualize(
+        self,
+        result,
+        ref_genome="",
+        qry_genome="",
+        identity=90,
+        input_source=None,
+        genome_files=None,
+        legacy_only=False,
+        report_suffix=None,
+    ):
         """
         生成 Location 模式的报告
         
@@ -4636,11 +4765,19 @@ class LocationVisualizer(BaseVisualizer):
         html += self._get_html_footer()
         
         # 保存报告
-        report_file = os.path.join(self.output_dir, f"{loc_id}.report.html")
+        target_suffix = report_suffix
+        if target_suffix is None and len(result.get("query_results") or []) > 1:
+            target_suffix = self._legacy_report_suffix_for_result(result, genome_files)
+        report_file = self._legacy_report_path(loc_id, target_suffix)
         with open(report_file, "w", encoding="utf-8") as f:
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
+        if legacy_only:
+            return report_file
+        legacy_report = self._build_legacy_report_map(
+            result, "location", report_file, ref_genome, qry_genome, identity, input_source, genome_files
+        )
         report_index = self._finalize_single_query_report(
             result,
             "location",
@@ -4648,7 +4785,7 @@ class LocationVisualizer(BaseVisualizer):
             qry_genome,
             identity,
             genome_files,
-            report_file,
+            legacy_report,
             output_files,
         )
         print(f"[INFO] 已生成新框架报告: {report_index}")
@@ -4658,7 +4795,17 @@ class LocationVisualizer(BaseVisualizer):
 class SequenceVisualizer(BaseVisualizer):
     """Sequence 模式可视化"""
 
-    def visualize(self, result, ref_genome="", qry_genome=None, identity=90, input_source=None, genome_files=None):
+    def visualize(
+        self,
+        result,
+        ref_genome="",
+        qry_genome=None,
+        identity=90,
+        input_source=None,
+        genome_files=None,
+        legacy_only=False,
+        report_suffix=None,
+    ):
         """
         生成 Sequence 模式的报告
         
@@ -4752,11 +4899,19 @@ class SequenceVisualizer(BaseVisualizer):
         html += self._get_html_footer()
         
         # 保存报告
-        report_file = os.path.join(self.output_dir, f"{seq_id}.report.html")
+        target_suffix = report_suffix
+        if target_suffix is None and len(result.get("query_results") or []) > 1:
+            target_suffix = self._legacy_report_suffix_for_result(result, genome_files)
+        report_file = self._legacy_report_path(seq_id, target_suffix)
         with open(report_file, "w", encoding="utf-8") as f:
             f.write(html)
         
         print(f"[INFO] 已生成报告: {report_file}")
+        if legacy_only:
+            return report_file
+        legacy_report = self._build_legacy_report_map(
+            result, "sequence", report_file, ref_genome, qry_genome, identity, input_source, genome_files
+        )
         report_index = self._finalize_single_query_report(
             result,
             "sequence",
@@ -4764,7 +4919,7 @@ class SequenceVisualizer(BaseVisualizer):
             qry_genome,
             identity,
             genome_files,
-            report_file,
+            legacy_report,
             output_files,
         )
         print(f"[INFO] 已生成新框架报告: {report_index}")

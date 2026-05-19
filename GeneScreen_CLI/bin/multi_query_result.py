@@ -331,7 +331,7 @@ def build_multi_query_payload(
     identity: float = 90,
     min_aln_len: int = 100,
     genome_files: Optional[Dict[str, Any]] = None,
-    legacy_report: Optional[str] = None,
+    legacy_report: Optional[Any] = None,
     extra_files: Optional[List[Tuple[str, Optional[str], str]]] = None,
 ) -> Dict[str, Any]:
     genome_files = genome_files or {}
@@ -369,6 +369,7 @@ def build_multi_query_payload(
     best_candidates = {}
     per_query_candidate_counts = {}
     total_candidate_count = 0
+    legacy_extra_files = []
     combined_variant_stats = {"SNP": 0, "INS": 0, "DEL": 0, "INDEL": 0, "total": 0}
 
     def entry_for(index: int, query_result: Dict[str, Any]) -> Dict[str, Any]:
@@ -379,6 +380,13 @@ def build_multi_query_payload(
             "fasta": query_result.get("query_fasta"),
             "gff": query_result.get("query_gff"),
         }
+
+    def legacy_report_for(index: int, query_safe: str) -> Optional[str]:
+        if isinstance(legacy_report, dict):
+            return legacy_report.get(query_safe) or legacy_report.get(str(index))
+        if isinstance(legacy_report, (list, tuple)):
+            return legacy_report[index] if index < len(legacy_report) else None
+        return legacy_report if index == 0 else None
 
     for index, query_result in enumerate(query_results):
         entry = entry_for(index, query_result)
@@ -400,6 +408,13 @@ def build_multi_query_payload(
         variants = parse_variants(query_result.get("snps"))
         stats = parse_variant_stats(query_result.get("snps"))
         selected_candidate = candidates[0] if candidates else None
+        pair_legacy_report = legacy_report_for(index, query_safe)
+        if pair_legacy_report:
+            legacy_extra_files.append({
+                "label": os.path.basename(pair_legacy_report),
+                "path": relpath(pair_legacy_report, report_dir),
+                "description": f"旧版单报告：{ref_entry_name} vs {query_name}",
+            })
 
         query_order.append(query_safe)
         selected_candidates[query_safe] = selected_candidate["candidate_id"] if selected_candidate else None
@@ -442,7 +457,7 @@ def build_multi_query_payload(
                 "coords": relpath(coords_copy, report_dir),
                 "snps": relpath(snps_copy, report_dir),
                 "hl": relpath(hl_copy, report_dir),
-                "legacy_report": relpath(legacy_report, report_dir) if index == 0 else None,
+                "legacy_report": relpath(pair_legacy_report, report_dir),
             },
             "candidate_ids": [candidate["candidate_id"] for candidate in candidates],
             "stats": {
@@ -572,7 +587,7 @@ def build_multi_query_payload(
                 "variants": combined_variant_stats,
             },
         },
-        "extra_files": [
+        "extra_files": legacy_extra_files + [
             {"label": label, "path": relpath(path, report_dir), "description": desc}
             for label, path, desc in extra_files
             if path
@@ -589,7 +604,7 @@ def build_single_query_payload(
     identity: float = 90,
     min_aln_len: int = 100,
     genome_files: Optional[Dict[str, Any]] = None,
-    legacy_report: Optional[str] = None,
+    legacy_report: Optional[Any] = None,
     extra_files: Optional[List[Tuple[str, Optional[str], str]]] = None,
 ) -> Dict[str, Any]:
     if len(result.get("query_results") or []) > 1:
