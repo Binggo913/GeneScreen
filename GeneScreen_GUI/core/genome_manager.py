@@ -403,7 +403,9 @@ class GenomeManager:
             print(f"[ERROR] '{name}' 不是自定义基因组，请使用 remove_downloaded()")
             return False
 
-        self.db.delete_genome(name)
+        if not self.db.delete_genome(name):
+            print(f"[ERROR] 删除基因组库记录失败: {name}")
+            return False
         print(f"[INFO] 已移除自定义基因组: {name}")
         return True
 
@@ -958,14 +960,19 @@ class GenomeManager:
             print(f"[ERROR] '{genome_id}' 是自定义基因组，请使用 remove_custom()")
             return False
 
+        # 先删除数据库记录，确保基因组库立即生效；文件清理由后续步骤完成。
+        if not self.db.delete_genome(genome_id):
+            print(f"[ERROR] 删除基因组库记录失败: {genome_id}")
+            return False
+
         # 删除文件
         genome_dir = self.cache_dir / genome_id
         if genome_dir.exists():
-            shutil.rmtree(genome_dir)
-            print(f"[INFO] 已删除文件: {genome_dir}")
-
-        # 删除数据库记录
-        self.db.delete_genome(genome_id)
+            try:
+                shutil.rmtree(genome_dir)
+                print(f"[INFO] 已删除文件: {genome_dir}")
+            except Exception as e:
+                print(f"[WARNING] 已删除基因组库记录，但文件删除失败: {genome_dir} ({e})")
         print(f"[INFO] 已删除基因组: {genome_id}")
         return True
 
