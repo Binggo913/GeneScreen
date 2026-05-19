@@ -749,6 +749,7 @@ class GeneIDProcessor:
         upstream: int = 0,
         downstream: int = 0,
         min_aln_len: int = 100,
+        merge_gap: int = 1000,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
         candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
@@ -764,6 +765,7 @@ class GeneIDProcessor:
         self.upstream = upstream
         self.downstream = downstream
         self.min_aln_len = min_aln_len
+        self.merge_gap = merge_gap
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         self.genome_files = {
@@ -857,6 +859,7 @@ class LocationProcessor:
         ref_gff: Optional[str] = None,
         qry_gff: Optional[str] = None,
         min_aln_len: int = 100,
+        merge_gap: int = 1000,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
         candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
@@ -871,6 +874,7 @@ class LocationProcessor:
         self.qry_name = self.query_entries[0]["name"] if self.query_entries else qry_name
         self.identity = identity
         self.min_aln_len = min_aln_len
+        self.merge_gap = merge_gap
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         self.genome_files = {
@@ -964,6 +968,7 @@ class SequenceProcessor:
         identity: float = 90,
         ref_gff: Optional[str] = None,
         min_aln_len: int = 100,
+        merge_gap: int = 1000,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
         upstream: int = 0,
         downstream: int = 0,
@@ -979,6 +984,7 @@ class SequenceProcessor:
         self.ref_name = self.query_entries[0]["name"] if self.query_entries else ref_name
         self.identity = identity
         self.min_aln_len = min_aln_len
+        self.merge_gap = merge_gap
         self.upstream = upstream
         self.downstream = downstream
         self.candidate_limit = candidate_limit
