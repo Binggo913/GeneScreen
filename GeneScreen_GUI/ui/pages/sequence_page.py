@@ -457,6 +457,7 @@ class SequencePage(QWidget):
                 on_started=on_started,
             )
         )
+        QMessageBox.information(self, "提交成功", "分析任务已提交到后台队列，可在历史记录中查看状态。")
     
     def _on_item_finished(self, seq_id: str, result: object, error: str):
         """单个序列分析完成回调"""

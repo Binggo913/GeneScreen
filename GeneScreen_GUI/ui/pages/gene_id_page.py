@@ -905,6 +905,7 @@ class GeneIDPage(QWidget):
                 on_started=on_started,
             )
         )
+        QMessageBox.information(self, "提交成功", "分析任务已提交到后台队列，可在历史记录中查看状态。")
     
     def _on_analysis_finished(self, success: bool, result: dict, message: str):
         """分析完成回调"""
