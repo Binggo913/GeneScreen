@@ -315,6 +315,7 @@ class HistoryPage(QWidget):
         label_map = {
             "completed": "✓ 已完成",
             "running": "Running",
+            "reporting": "Reporting",
             "pending": "Pending",
             "failed": "Failed",
         }
@@ -322,6 +323,7 @@ class HistoryPage(QWidget):
         color_map = {
             "completed": QColor("#16a34a"),
             "running": QColor("#2563eb"),
+            "reporting": QColor("#7c3aed"),
             "pending": QColor("#8a6d3b"),
             "failed": QColor("#dc2626"),
         }

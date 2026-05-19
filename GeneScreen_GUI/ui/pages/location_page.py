@@ -31,6 +31,7 @@ class LocationAnalysisThread(QThread):
     """分析线程"""
     progress = Signal(str)
     finished = Signal(bool, dict, str)
+    item_started = Signal(str)  # loc_key
     item_finished = Signal(str, object, str)  # loc_key, result, error
     
     def __init__(self, processor, locations: list, output_dir_builder=None, parent=None):
@@ -43,6 +44,7 @@ class LocationAnalysisThread(QThread):
         results = []
         for i, loc in enumerate(self.locations):
             loc_label = loc.get("label") or f"{loc['chrom']}:{loc['start']}-{loc['end']}"
+            self.item_started.emit(loc_label)
             self.progress.emit(f"处理 {loc_label} ({i+1}/{len(self.locations)})...")
             try:
                 loc_key = loc_label
@@ -402,6 +404,7 @@ class LocationPage(QWidget):
         self.analysis_thread.ref_name = ref_genome.get("name", "")
         self.analysis_thread.qry_name = qry_genome.get("name", "")
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
+        self.analysis_thread.item_started.connect(self._on_item_started)
         self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
         history_ids = list(history_map.values())
@@ -415,6 +418,7 @@ class LocationPage(QWidget):
                 history_ids=history_ids,
                 label=f"Location: {len(locations)} item(s)",
                 on_started=on_started,
+                mark_history_running_on_start=False,
             )
         )
         QMessageBox.information(self, "提交成功", "分析任务已提交到后台队列，可在历史记录中查看状态。")
@@ -426,6 +430,13 @@ class LocationPage(QWidget):
         if not success:
             QMessageBox.warning(self, "分析失败", message)
 
+    def _on_item_started(self, loc_key: str):
+        sender = self.sender()
+        history_map = getattr(sender, "history_map", self._history_map)
+        history_id = history_map.get(loc_key)
+        if history_id:
+            get_database().update_history(history_id, status="running")
+
     def _on_item_finished(self, loc_key: str, result: object, error: str):
         sender = self.sender()
         history_map = getattr(sender, "history_map", self._history_map)
@@ -435,6 +446,7 @@ class LocationPage(QWidget):
             return
         db = get_database()
         if result:
+            db.update_history(history_id, status="reporting")
             output_dir = output_dir_map.get(loc_key, "") or result.get("output_dir", "")
             ref_name = getattr(sender, "ref_name", "") or self.genome_selector.get_ref_genome().get("name", "")
             qry_name = getattr(sender, "qry_name", "") or self.genome_selector.get_qry_genome().get("name", "")

@@ -35,6 +35,7 @@ class AnalysisThread(QThread):
     """分析线程"""
     progress = Signal(str)
     finished = Signal(bool, dict, str)  # success, result, message
+    item_started = Signal(str)  # gene_id
     item_finished = Signal(str, object, str)  # gene_id, result, error
     
     def __init__(self, processor, gene_ids: list, output_dir_builder=None, parent=None):
@@ -46,6 +47,7 @@ class AnalysisThread(QThread):
     def run(self):
         results = []
         for i, gene_id in enumerate(self.gene_ids):
+            self.item_started.emit(gene_id)
             self.progress.emit(f"处理 {gene_id} ({i+1}/{len(self.gene_ids)})...")
             try:
                 if self.output_dir_builder:
@@ -890,6 +892,7 @@ class GeneIDPage(QWidget):
         self.analysis_thread.ref_name = ref_genome.get("name", "")
         self.analysis_thread.qry_name = qry_genome.get("name", "")
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
+        self.analysis_thread.item_started.connect(self._on_item_started)
         self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
         history_ids = list(history_map.values())
@@ -903,6 +906,7 @@ class GeneIDPage(QWidget):
                 history_ids=history_ids,
                 label=f"Gene ID: {len(gene_ids)} item(s)",
                 on_started=on_started,
+                mark_history_running_on_start=False,
             )
         )
         QMessageBox.information(self, "提交成功", "分析任务已提交到后台队列，可在历史记录中查看状态。")
@@ -914,6 +918,13 @@ class GeneIDPage(QWidget):
         if not success:
             QMessageBox.warning(self, "分析失败", message)
 
+    def _on_item_started(self, gene_id: str):
+        sender = self.sender()
+        history_map = getattr(sender, "history_map", self._history_map)
+        history_id = history_map.get(gene_id)
+        if history_id:
+            get_database().update_history(history_id, status="running")
+
     def _on_item_finished(self, gene_id: str, result: object, error: str):
         sender = self.sender()
         history_map = getattr(sender, "history_map", self._history_map)
@@ -923,6 +934,7 @@ class GeneIDPage(QWidget):
             return
         db = get_database()
         if result:
+            db.update_history(history_id, status="reporting")
             output_dir = output_dir_map.get(gene_id, "") or result.get("output_dir", "")
             ref_name = getattr(sender, "ref_name", "") or self.genome_selector.get_ref_genome().get("name", "")
             qry_name = getattr(sender, "qry_name", "") or self.genome_selector.get_qry_genome().get("name", "")

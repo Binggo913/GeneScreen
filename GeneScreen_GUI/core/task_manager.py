@@ -17,6 +17,7 @@ class AnalysisTask:
     history_ids: List[int]
     label: str = ""
     on_started: Optional[Callable[[], None]] = None
+    mark_history_running_on_start: bool = True
 
 
 class AnalysisTaskManager(QObject):
@@ -58,8 +59,9 @@ class AnalysisTaskManager(QObject):
         while self._pending and len(self._running) < self._max_running:
             task = self._pending.popleft()
             self._running.append(task)
-            for history_id in task.history_ids:
-                get_database().update_history(history_id, status="running")
+            if task.mark_history_running_on_start:
+                for history_id in task.history_ids:
+                    get_database().update_history(history_id, status="running")
             if task.on_started:
                 task.on_started()
             task.thread.finished.connect(lambda *_, t=task: self._on_task_finished(t))

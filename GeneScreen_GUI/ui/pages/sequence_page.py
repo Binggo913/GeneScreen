@@ -31,6 +31,7 @@ class SequenceAnalysisThread(QThread):
     """分析线程 - 支持多序列批量处理"""
     progress = Signal(str)
     finished = Signal(bool, dict, str)
+    item_started = Signal(str)  # seq_id
     item_finished = Signal(str, object, str)  # seq_id, result, error
     
     def __init__(self, processor, sequences: list, output_dir_builder=None, parent=None):
@@ -43,6 +44,7 @@ class SequenceAnalysisThread(QThread):
         results = []
         for i, seq in enumerate(self.sequences):
             seq_id = seq["seq_id"]
+            self.item_started.emit(seq_id)
             self.progress.emit(f"处理序列 {seq_id} ({i+1}/{len(self.sequences)})...")
             try:
                 # 设置输出目录
@@ -442,6 +444,7 @@ class SequencePage(QWidget):
         self.analysis_thread.batch_mode = multi_mode
         self.analysis_thread.ref_name = qry_genome.get("name", "")
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
+        self.analysis_thread.item_started.connect(self._on_item_started)
         self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
         history_ids = list(history_map.values())
@@ -455,10 +458,18 @@ class SequencePage(QWidget):
                 history_ids=history_ids,
                 label=f"Sequence: {len(sequences)} item(s)",
                 on_started=on_started,
+                mark_history_running_on_start=False,
             )
         )
         QMessageBox.information(self, "提交成功", "分析任务已提交到后台队列，可在历史记录中查看状态。")
     
+    def _on_item_started(self, seq_id: str):
+        sender = self.sender()
+        history_map = getattr(sender, "history_map", self._history_map)
+        history_id = history_map.get(seq_id)
+        if history_id:
+            get_database().update_history(history_id, status="running")
+
     def _on_item_finished(self, seq_id: str, result: object, error: str):
         """单个序列分析完成回调"""
         sender = self.sender()
@@ -469,6 +480,7 @@ class SequencePage(QWidget):
             return
         db = get_database()
         if result:
+            db.update_history(history_id, status="reporting")
             output_dir = output_dir_map.get(seq_id, "") or result.get("output_dir", "")
             ref_name = getattr(sender, "ref_name", "") or self.genome_selector.get_qry_genome().get("name", "")
             job = {
