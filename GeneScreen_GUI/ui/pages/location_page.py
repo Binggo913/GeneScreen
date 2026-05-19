@@ -16,6 +16,7 @@ import re
 
 from ui.widgets.genome_selector import GenomePairSelector
 from ui.widgets.analysis_layout import (
+    configure_auto_growing_text_edit,
     configure_pairwise_limit_controls,
     create_card,
     create_scroll_content,
@@ -122,7 +123,7 @@ class LocationPage(QWidget):
         # 批量输入
         self.batch_input = QTextEdit()
         self.batch_input.setPlaceholderText("Chr1:1000000-1050000\nChr2:2000000-2100000\n...")
-        self.batch_input.setMinimumHeight(120)
+        configure_auto_growing_text_edit(self.batch_input, min_lines=2)
         input_layout.addWidget(self.batch_input)
         
         layout.addWidget(input_group)
@@ -209,6 +210,7 @@ class LocationPage(QWidget):
         btn_layout.addStretch()
         
         self.run_btn = QPushButton("🚀 开始分析")
+        self.run_btn.setProperty("primaryAction", True)
         self.run_btn.setMinimumWidth(150)
         self.run_btn.setMinimumHeight(45)
         self.run_btn.clicked.connect(self._run_analysis)

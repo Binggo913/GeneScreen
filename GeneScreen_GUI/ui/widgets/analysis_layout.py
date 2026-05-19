@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSpinBox,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -96,3 +97,23 @@ def configure_pairwise_limit_controls(
 
     pairwise_all_input.toggled.connect(sync_candidate_limit)
     sync_candidate_limit(pairwise_all_input.isChecked())
+
+
+def text_edit_height_for_lines(text_edit: QTextEdit, line_count: int, min_lines: int = 2) -> int:
+    """Calculate a compact QTextEdit height from its visible line count."""
+    return text_edit.fontMetrics().lineSpacing() * max(min_lines, line_count) + 30
+
+
+def configure_auto_growing_text_edit(text_edit: QTextEdit, min_lines: int = 2):
+    """Grow a QTextEdit with its content while leaving page scroll to the parent."""
+    text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+    def resize_to_content() -> None:
+        line_count = text_edit.toPlainText().count("\n") + 1
+        text_edit.setFixedHeight(text_edit_height_for_lines(text_edit, line_count, min_lines))
+        text_edit.updateGeometry()
+
+    text_edit.textChanged.connect(resize_to_content)
+    resize_to_content()
+    return resize_to_content

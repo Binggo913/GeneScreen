@@ -16,6 +16,7 @@ import re
 
 from ui.widgets.genome_selector import GenomePairSelector
 from ui.widgets.analysis_layout import (
+    configure_auto_growing_text_edit,
     configure_pairwise_limit_controls,
     create_card,
     create_scroll_content,
@@ -112,27 +113,27 @@ class SequencePage(QWidget):
         input_group, input_layout = create_card("Seq 序列")
         
         # 序列输入（支持多序列 FASTA）
+        seq_header = QHBoxLayout()
         seq_label = QLabel("序列 (支持多序列 FASTA 格式):")
         seq_label.setProperty("role", "muted")
-        input_layout.addWidget(seq_label)
-        
-        # 从文件加载
-        file_layout = QHBoxLayout()
-        file_layout.addStretch()
+        seq_header.addWidget(seq_label)
+        seq_header.addStretch()
         
         load_btn = QPushButton("📂 从文件加载")
+        load_btn.setProperty("secondary", True)
+        load_btn.setProperty("compactAction", True)
         load_btn.setMinimumWidth(150)
-        load_btn.setFixedHeight(36)
+        load_btn.setFixedHeight(38)
         load_btn.clicked.connect(self._load_from_file)
-        file_layout.addWidget(load_btn)
-        input_layout.addLayout(file_layout)
+        seq_header.addWidget(load_btn)
+        input_layout.addLayout(seq_header)
 
         self.sequence_input = QTextEdit()
         self.sequence_input.setPlaceholderText(
             ">seq1\nATGCATGCATGC...\n>seq2\nGCTAGCTAGCTA...\n\n"
             "或直接输入纯序列 (自动命名为 query_seq_1, query_seq_2...)"
         )
-        self.sequence_input.setMinimumHeight(170)
+        configure_auto_growing_text_edit(self.sequence_input, min_lines=2)
         input_layout.addWidget(self.sequence_input)
         
         layout.addWidget(input_group)
@@ -241,6 +242,7 @@ class SequencePage(QWidget):
         btn_layout.addStretch()
         
         self.run_btn = QPushButton("🚀 开始分析")
+        self.run_btn.setProperty("primaryAction", True)
         self.run_btn.setMinimumWidth(150)
         self.run_btn.setMinimumHeight(45)
         self.run_btn.clicked.connect(self._run_analysis)
