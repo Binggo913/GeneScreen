@@ -855,7 +855,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       padding: 20px;
     }
     .container {
-      max-width: 1320px;
+      max-width: 1200px;
       margin: 0 auto;
       background: #fff;
       border-radius: 8px;
@@ -873,6 +873,17 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       gap: 20px;
       align-items: flex-start;
     }
+    .header-left {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .header-right {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 10px;
+    }
     .header h1 { font-size: 24px; margin-bottom: 10px; }
     .subtitle {
       display: flex;
@@ -882,7 +893,37 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       opacity: 0.95;
       font-size: 14px;
     }
+    .report-title {
+      font-size: 13px;
+      opacity: 0.9;
+    }
     .gen-time { margin-top: 8px; font-size: 13px; opacity: 0.85; }
+    .lang-switch {
+      display: flex;
+      gap: 0;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.3);
+    }
+    .lang-btn {
+      height: 32px;
+      background: transparent;
+      border: none;
+      color: rgba(255,255,255,0.7);
+      padding: 6px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .lang-btn:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
+    }
+    .lang-btn.active {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      font-weight: 600;
+    }
     .mode-badge {
       display: inline-block;
       padding: 4px 12px;
@@ -902,6 +943,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-size: 12px;
       text-decoration: none;
     }
+    .json-badge:hover { background: rgba(255,255,255,0.1); }
     .section { padding: 25px 30px; border-bottom: 1px solid #eee; }
     .section:last-child { border-bottom: none; }
     .section h2 {
@@ -1075,7 +1117,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     .control-row[draggable="true"] { cursor: grab; }
     .control-row.dragging { opacity: .55; }
-    select, button {
+    select, .control-row button {
       height: 32px;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -1083,8 +1125,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       color: #333;
     }
     select { width: 100%; padding: 0 8px; }
-    button { cursor: pointer; color: #667eea; font-weight: 600; }
-    button:hover { background: #f3f0ff; }
+    .control-row button { cursor: pointer; color: #667eea; font-weight: 600; }
+    .control-row button:hover { background: #f3f0ff; }
     .track-stack { min-width: 760px; }
     .detail-canvas {
       min-width: 820px;
@@ -1133,6 +1175,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     @media (max-width: 900px) {
       body { padding: 10px; }
       .header-content, .detail-layout { display: block; }
+      .header-right { align-items: flex-start; margin-top: 14px; }
       .section { padding: 20px 16px; }
       .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
       .overview-track { grid-template-columns: 120px minmax(420px, 1fr); }
@@ -1144,30 +1187,37 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
 <div class="container">
   <div class="header">
     <div class="header-content">
-      <div>
-        <h1>__TITLE__</h1>
+      <div class="header-left">
+        <h1 data-zh="GeneScreen 比对分析报告" data-en="GeneScreen Alignment Analysis Report">GeneScreen 比对分析报告</h1>
         <div class="subtitle">
           <span class="mode-badge" id="modeBadge">GeneScreen</span>
-          <span>1 ref + N query alignment report</span>
+          <span id="reportScope" data-zh="1 ref + N query 比对报告" data-en="1 ref + N query alignment report">1 ref + N query 比对报告</span>
+          <span class="report-title" data-zh="输入：__TITLE__" data-en="Input: __TITLE__">输入：__TITLE__</span>
         </div>
         <div class="gen-time" id="generatedAt"></div>
       </div>
-      <a class="json-badge" href="data.json">data.json</a>
+      <div class="header-right">
+        <div class="lang-switch">
+          <button class="lang-btn active" data-lang="zh" onclick="switchLang('zh')">中文</button>
+          <button class="lang-btn" data-lang="en" onclick="switchLang('en')">EN</button>
+        </div>
+        <a class="json-badge" href="data.json" data-zh="结构化数据 data.json" data-en="Structured data.json">结构化数据 data.json</a>
+      </div>
     </div>
   </div>
 
   <div class="section input-section">
-    <h2>初始化</h2>
+    <h2 data-zh="初始化" data-en="Initialization">初始化</h2>
     <table class="info-table" id="initTable"></table>
   </div>
 
   <div class="section">
-    <h2>输入文件</h2>
+    <h2 data-zh="输入文件" data-en="Input Files">输入文件</h2>
     <table class="file-table" id="genomeTable"></table>
   </div>
 
   <div class="section stats-section">
-    <h2>结果统计</h2>
+    <h2 data-zh="结果统计" data-en="Statistics">结果统计</h2>
     <table class="stats-table">
       <thead><tr id="statsHead"></tr></thead>
       <tbody><tr id="statsBody"></tr></tbody>
@@ -1175,34 +1225,36 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
   </div>
 
   <div class="section overview-section visualization-section">
-    <h2>宏观比对图</h2>
+    <h2 data-zh="宏观比对图" data-en="Alignment Overview">宏观比对图</h2>
     <div class="viz-container">
       <div id="overview" class="overview-canvas"></div>
       <div class="viz-legend-note">
-        <p>绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 <code>data.json</code>，切换显示不会重新计算。</p>
+        <p data-zh="绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 data.json，切换显示不会重新计算。"
+           data-en="Green blocks indicate the best candidate for each query genome; click a candidate to switch the local combination below. Data comes from data.json and switching does not recompute.">绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 data.json，切换显示不会重新计算。</p>
       </div>
     </div>
   </div>
 
   <div class="section visualization-section">
-    <h2>局部比对图</h2>
+    <h2 data-zh="局部比对图" data-en="Local Alignment">局部比对图</h2>
     <div class="viz-container">
       <div class="detail-layout">
         <div id="controls" class="controls"></div>
         <div id="detail" class="track-stack"></div>
       </div>
       <div class="viz-legend-note">
-        <p>左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。</p>
+        <p data-zh="左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。"
+           data-en="Use the dropdowns on the left to switch candidates; use the up/down buttons or drag tracks to adjust display order.">左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。</p>
       </div>
     </div>
   </div>
 
   <div class="section output-section">
-    <h2>结果文件</h2>
+    <h2 data-zh="结果文件" data-en="Output Files">结果文件</h2>
     <table class="file-table" id="outputTable"></table>
   </div>
 </div>
-<div id="copyToast" class="copy-toast">已复制到剪贴板</div>
+<div id="copyToast" class="copy-toast" data-zh="已复制到剪贴板" data-en="Copied to clipboard">已复制到剪贴板</div>
 
   <script id="embedded-report-data" type="application/json">__EMBEDDED_DATA__</script>
   <script>
@@ -1210,12 +1262,71 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => { reportData = data; init(); }).catch(init);
 
     const state = { selected: {}, order: [] };
+    let currentLang = 'zh';
+    const i18n = {
+      inputId: { zh: '输入 ID', en: 'Input ID' },
+      mode: { zh: '模式', en: 'Mode' },
+      sequenceLength: { zh: '序列长度', en: 'Sequence Length' },
+      identityThreshold: { zh: 'Identity 阈值', en: 'Identity Threshold' },
+      minAlignmentLength: { zh: '最小比对长度', en: 'Minimum Alignment Length' },
+      pairwiseTopN: { zh: 'Pairwise Top-N', en: 'Pairwise Top-N' },
+      allCandidates: { zh: '全量候选', en: 'All Candidates' },
+      queryUpstream: { zh: '查询上游延伸', en: 'Query Upstream Extension' },
+      queryDownstream: { zh: '查询下游延伸', en: 'Query Downstream Extension' },
+      type: { zh: '类型', en: 'Type' },
+      name: { zh: '名称', en: 'Name' },
+      fasta: { zh: 'FASTA', en: 'FASTA' },
+      annotation: { zh: '注释', en: 'Annotation' },
+      reference: { zh: '参考', en: 'Reference' },
+      query: { zh: '查询', en: 'Query' },
+      annotationNotUsed: { zh: '未使用注释', en: 'Annotation not used' },
+      genomes: { zh: '基因组', en: 'Genomes' },
+      queryGenomes: { zh: '查询基因组', en: 'Query Genomes' },
+      candidates: { zh: '候选片段', en: 'Candidates' },
+      candidateUnit: { zh: 'candidates', en: 'candidates' },
+      visibleLinks: { zh: '可见连接', en: 'Visible Links' },
+      snpCount: { zh: 'SNP 数量', en: 'SNP Count' },
+      indelCount: { zh: 'Indel 数量', en: 'Indel Count' },
+      noCandidates: { zh: '无候选片段', en: 'No candidates' },
+      candidateSwitch: { zh: '候选切换', en: 'Candidate Selection' },
+      moveUp: { zh: '上移', en: 'Move up' },
+      moveDown: { zh: '下移', en: 'Move down' },
+      noTracks: { zh: '无可显示轨道', en: 'No tracks' },
+      filename: { zh: '文件名', en: 'File Name' },
+      description: { zh: '描述', en: 'Description' },
+      path: { zh: '路径', en: 'Path' },
+      structuredData: { zh: '新版报告结构化数据', en: 'Structured data for the new report' },
+      generatedAt: { zh: '生成时间', en: 'Generated' },
+      geneIdMode: { zh: 'Gene ID 模式', en: 'Gene ID Mode' },
+      locationMode: { zh: 'Location 模式', en: 'Location Mode' },
+      sequenceMode: { zh: 'Sequence 模式', en: 'Sequence Mode' },
+      reportTitle: { zh: 'GeneScreen 比对分析报告', en: 'GeneScreen Alignment Analysis Report' }
+    };
     function esc(value) {
       return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     }
-    function init() {
-      state.selected = Object.assign({}, reportData.default_selection.selected_candidates || {});
-      state.order = (reportData.default_selection.track_order || []).slice();
+    function t(key) {
+      return (i18n[key] && i18n[key][currentLang]) || key;
+    }
+    function modeText(mode) {
+      const raw = String(mode || 'GeneScreen');
+      const normalized = raw.toLowerCase().replace(/[\s-]+/g, '_');
+      if (normalized.includes('gene_id')) return t('geneIdMode');
+      if (normalized.includes('location')) return t('locationMode');
+      if (normalized.includes('sequence')) return t('sequenceMode');
+      return raw;
+    }
+    function applyStaticLang() {
+      document.documentElement.lang = currentLang === 'en' ? 'en' : 'zh-CN';
+      document.querySelectorAll('.lang-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.lang === currentLang);
+      });
+      document.querySelectorAll('[data-zh][data-en]').forEach(el => {
+        el.textContent = el.dataset[currentLang];
+      });
+    }
+    function switchLang(lang) {
+      currentLang = lang === 'en' ? 'en' : 'zh';
       renderHeader();
       renderInit();
       renderGenomes();
@@ -1224,6 +1335,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderControls();
       renderDetail();
       renderOutputs();
+      applyStaticLang();
+    }
+    function init() {
+      state.selected = Object.assign({}, reportData.default_selection.selected_candidates || {});
+      state.order = (reportData.default_selection.track_order || []).slice();
+      switchLang(currentLang);
     }
     function queryIds() { return (reportData.overview && reportData.overview.query_order) || []; }
     function trackById(trackId) {
@@ -1282,21 +1399,22 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       return String(type || '').toUpperCase() === 'SNP' ? 'snp' : 'indel';
     }
     function renderHeader() {
-      document.getElementById('modeBadge').textContent = reportData.mode || 'GeneScreen';
-      document.getElementById('generatedAt').textContent = reportData.generated_at ? `生成时间：${reportData.generated_at}` : '';
+      document.getElementById('modeBadge').textContent = modeText(reportData.mode);
+      const generatedText = reportData.generated_at ? `${t('generatedAt')}: ${reportData.generated_at}` : '';
+      document.getElementById('generatedAt').textContent = generatedText;
     }
     function renderInit() {
       const input = reportData.input || {};
       const params = reportData.parameters || {};
       const rows = [
-        ['输入 ID', `<code>${esc(input.id || '-')}</code>`],
-        ['模式', esc(reportData.mode || '-')],
-        ['序列长度', input.sequence_length ? `${Number(input.sequence_length).toLocaleString()} bp` : '-'],
-        ['Identity 阈值', params.identity != null ? `${params.identity}%` : '-'],
-        ['最小比对长度', params.min_aln_len != null ? `${params.min_aln_len} bp` : '-'],
-        ['Pairwise Top-N', params.pairwise_all ? '全量候选' : (params.candidate_limit ?? '-')],
-        ['查询上游延伸', `${params.query_upstream || 0} bp`],
-        ['查询下游延伸', `${params.query_downstream || 0} bp`]
+        [t('inputId'), `<code>${esc(input.id || '-')}</code>`],
+        [t('mode'), esc(modeText(reportData.mode))],
+        [t('sequenceLength'), input.sequence_length ? `${Number(input.sequence_length).toLocaleString()} bp` : '-'],
+        [t('identityThreshold'), params.identity != null ? `${params.identity}%` : '-'],
+        [t('minAlignmentLength'), params.min_aln_len != null ? `${params.min_aln_len} bp` : '-'],
+        [t('pairwiseTopN'), params.pairwise_all ? t('allCandidates') : (params.candidate_limit ?? '-')],
+        [t('queryUpstream'), `${params.query_upstream || 0} bp`],
+        [t('queryDownstream'), `${params.query_downstream || 0} bp`]
       ];
       document.getElementById('initTable').innerHTML = rows.map(([k, v]) => `<tr><td class="label">${k}</td><td class="value">${v}</td></tr>`).join('');
     }
@@ -1304,11 +1422,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const ref = (reportData.genomes && reportData.genomes.ref) || {};
       const queries = (reportData.genomes && reportData.genomes.queries) || [];
       const rows = [
-        '<tr><th>类型</th><th>名称</th><th>FASTA</th><th>注释</th></tr>',
-        `<tr><td>参考</td><td>${esc(ref.name || '-')}</td><td><code class="path-code">${esc(ref.source_fasta || ref.artifact_fasta || '-')}</code></td><td><code class="path-code">${esc(ref.source_gff || ref.artifact_gff || '-')}</code></td></tr>`
+        `<tr><th>${t('type')}</th><th>${t('name')}</th><th>${t('fasta')}</th><th>${t('annotation')}</th></tr>`,
+        `<tr><td>${t('reference')}</td><td>${esc(ref.name || '-')}</td><td><code class="path-code">${esc(ref.source_fasta || ref.artifact_fasta || '-')}</code></td><td><code class="path-code">${esc(ref.source_gff || ref.artifact_gff || '-')}</code></td></tr>`
       ];
       for (const q of queries) {
-        rows.push(`<tr><td>查询</td><td>${esc(q.name || q.genome_id)}</td><td><code class="path-code">${esc(q.source_fasta || '-')}</code></td><td>${q.has_annotation ? `<code class="path-code">${esc(q.source_gff || '-')}</code>` : '<span class="file-na">未使用注释</span>'}</td></tr>`);
+        rows.push(`<tr><td>${t('query')}</td><td>${esc(q.name || q.genome_id)}</td><td><code class="path-code">${esc(q.source_fasta || '-')}</code></td><td>${q.has_annotation ? `<code class="path-code">${esc(q.source_gff || '-')}</code>` : `<span class="file-na">${t('annotationNotUsed')}</span>`}</td></tr>`);
       }
       document.getElementById('genomeTable').innerHTML = rows.join('');
     }
@@ -1317,12 +1435,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const variants = (s.selected_combination && s.selected_combination.variants) || {};
       const indelTotal = variants.INDEL || ((variants.INS || 0) + (variants.DEL || 0));
       const metrics = [
-        ['基因组', s.genome_count || 0],
-        ['查询基因组', s.query_count || 0],
-        ['候选片段', s.total_candidate_count || 0],
-        ['可见连接', (s.selected_combination && s.selected_combination.link_count) || 0],
-        ['SNP 数量', variants.SNP || 0],
-        ['Indel 数量', indelTotal],
+        [t('genomes'), s.genome_count || 0],
+        [t('queryGenomes'), s.query_count || 0],
+        [t('candidates'), s.total_candidate_count || 0],
+        [t('visibleLinks'), (s.selected_combination && s.selected_combination.link_count) || 0],
+        [t('snpCount'), variants.SNP || 0],
+        [t('indelCount'), indelTotal],
         ['INS', variants.INS || 0],
         ['DEL', variants.DEL || 0]
       ];
@@ -1340,7 +1458,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           chrMap.get(chr).push({ qid, candidate, bounds: candidateBounds(candidate) });
         }
       }
-      if (!chrMap.size) { root.innerHTML = '<div class="empty">No candidates</div>'; return; }
+      if (!chrMap.size) { root.innerHTML = `<div class="empty">${t('noCandidates')}</div>`; return; }
       const refTitle = esc((reportData.genomes && reportData.genomes.ref && reportData.genomes.ref.name) || 'ref-gene');
       const refId = esc(input.id || input.safe_id || 'A1');
       const body = document.createElement('div');
@@ -1362,7 +1480,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           const track = trackById(qid);
           const row = document.createElement('div');
           row.className = 'overview-track';
-          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} candidates</div></div><div class="lane"></div>`;
+          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} ${t('candidateUnit')}</div></div><div class="lane"></div>`;
           const lane = row.querySelector('.lane');
           for (const candidate of candidates) {
             const bounds = candidateBounds(candidate);
@@ -1388,7 +1506,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function renderControls() {
       const root = document.getElementById('controls');
-      root.innerHTML = '<h3>候选切换</h3>';
+      root.innerHTML = `<h3>${t('candidateSwitch')}</h3>`;
       for (const qid of queryIds()) {
         const track = trackById(qid);
         const row = document.createElement('div');
@@ -1396,7 +1514,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         row.draggable = true;
         row.dataset.trackId = qid;
         const options = (reportData.candidates[qid] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[qid] === c.candidate_id ? 'selected' : ''}>${esc(track.name)} · ${esc(c.candidate_id)}</option>`).join('');
-        row.innerHTML = `<select>${options}</select><button title="上移">↑</button><button title="下移">↓</button>`;
+        row.innerHTML = `<select>${options}</select><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
         row.querySelector('select').onchange = e => { state.selected[qid] = e.target.value; renderOverview(); renderDetail(); };
         row.children[1].onclick = () => moveTrack(qid, -1);
         row.children[2].onclick = () => moveTrack(qid, 1);
@@ -1440,7 +1558,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const range = trackId === 'ref' ? { start: 1, end: refLength() } : candidateBounds(candidate);
         return { trackId, track, candidate, range };
       }).filter(row => row.trackId === 'ref' || row.candidate);
-      if (!rows.length) { root.innerHTML = '<div class="detail-empty">No tracks</div>'; return; }
+      if (!rows.length) { root.innerHTML = `<div class="detail-empty">${t('noTracks')}</div>`; return; }
 
       const width = 1040;
       const labelWidth = 250;
@@ -1458,7 +1576,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       for (const row of rows) {
         const y = rowY(row);
         const subtitle = row.trackId === 'ref'
-          ? `reference · ${row.range.start}-${row.range.end}`
+          ? `${t('reference')} · ${row.range.start}-${row.range.end}`
           : `${row.candidate.candidate_id} · ${row.candidate.query_chr}:${row.range.start}-${row.range.end}`;
         fragments.push(`<rect class="detail-track-bg" x="0" y="${y - 30}" width="${width}" height="${rowStep - 8}" rx="8"></rect>`);
         fragments.push(`<text class="detail-label" x="18" y="${y - 5}">${esc(row.track.name || row.trackId)}</text>`);
@@ -1520,8 +1638,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg></div>`;
     }
     function renderOutputs() {
-      const rows = ['<tr><th>文件名</th><th>描述</th><th>路径</th></tr>'];
-      rows.push('<tr><td><a href="data.json">data.json</a></td><td>新版报告结构化数据</td><td><code class="path-code">report/data.json</code></td></tr>');
+      const rows = [`<tr><th>${t('filename')}</th><th>${t('description')}</th><th>${t('path')}</th></tr>`];
+      rows.push(`<tr><td><a href="data.json">data.json</a></td><td>${t('structuredData')}</td><td><code class="path-code">report/data.json</code></td></tr>`);
       for (const f of reportData.extra_files || []) {
         rows.push(`<tr><td>${esc(f.label || '-')}</td><td>${esc(f.description || '')}</td><td><code class="path-code">${esc(f.path || '')}</code></td></tr>`);
       }
