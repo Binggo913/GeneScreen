@@ -606,8 +606,9 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, obj, event):
-        if event.type() == QEvent.Wheel and isinstance(obj, QComboBox):
-            if self._suppress_unfocused_combo_wheel(obj, event):
+        if event.type() == QEvent.Wheel:
+            combo = self._combo_for_wheel_target(obj)
+            if combo and self._suppress_combo_wheel(combo, event):
                 return True
 
         if self.isMaximized() or self.isFullScreen():
@@ -635,11 +636,16 @@ class MainWindow(QMainWindow):
                         return True
         return super().eventFilter(obj, event)
 
-    def _suppress_unfocused_combo_wheel(self, combo: QComboBox, event) -> bool:
-        """Prevent accidental combo changes while wheel-scrolling pages."""
-        if combo.hasFocus() or combo.view().isVisible():
-            return False
+    def _combo_for_wheel_target(self, obj) -> QComboBox:
+        widget = obj if isinstance(obj, QWidget) else None
+        while widget:
+            if isinstance(widget, QComboBox):
+                return widget
+            widget = widget.parentWidget()
+        return None
 
+    def _suppress_combo_wheel(self, combo: QComboBox, event) -> bool:
+        """Disable mouse-wheel selection changes on closed combo boxes."""
         self._scroll_nearest_parent(combo, event)
         event.accept()
         return True
