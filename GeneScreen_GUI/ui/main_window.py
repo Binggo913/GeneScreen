@@ -822,7 +822,7 @@ class MainWindow(QMainWindow):
             for widget in widgets:
                 widget.style().unpolish(widget)
                 style.polish(widget)
-                widget.update()
+                QWidget.update(widget)
         finally:
             self.setUpdatesEnabled(True)
             self.update()
