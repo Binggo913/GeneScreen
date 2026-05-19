@@ -472,6 +472,12 @@ QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     padding: 6px 10px;
 }
 
+QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QComboBox:disabled {
+    background: palette(base);
+    color: palette(placeholder-text);
+    border: 1px solid palette(mid);
+}
+
 QSpinBox[paramInput="true"], QDoubleSpinBox[paramInput="true"], QLineEdit[paramInput="true"], QComboBox[paramInput="true"] {
     border-radius: 5px;
     padding: 4px 8px;
@@ -558,6 +564,31 @@ QComboBox QAbstractItemView::item:hover {
 }
 
 QComboBox QAbstractItemView::item:selected {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+}
+
+QListWidget[role="geneIdPopup"] {
+    background: palette(base);
+    color: palette(window-text);
+    border: 1px solid palette(dark);
+    border-radius: 6px;
+    padding: 4px;
+    outline: 0;
+}
+
+QListWidget[role="geneIdPopup"]::item {
+    background: palette(base);
+    color: palette(window-text);
+    min-height: 28px;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+QListWidget[role="geneIdPopup"]::item:hover,
+QListWidget[role="geneIdPopup"]::item:selected,
+QListWidget[role="geneIdPopup"]::item:selected:active,
+QListWidget[role="geneIdPopup"]::item:selected:!active {
     background: palette(highlight);
     color: palette(highlighted-text);
 }
