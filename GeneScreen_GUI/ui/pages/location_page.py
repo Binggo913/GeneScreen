@@ -150,6 +150,20 @@ class LocationPage(QWidget):
         self.min_aln_len_input.setProperty("paramInput", True)
         self.min_aln_len_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
 
+        self.upstream_input = QSpinBox()
+        self.upstream_input.setRange(0, 1000000)
+        self.upstream_input.setValue(0)
+        self.upstream_input.setFixedHeight(spin_height)
+        self.upstream_input.setProperty("paramInput", True)
+        self.upstream_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
+        self.downstream_input = QSpinBox()
+        self.downstream_input.setRange(0, 1000000)
+        self.downstream_input.setValue(0)
+        self.downstream_input.setFixedHeight(spin_height)
+        self.downstream_input.setProperty("paramInput", True)
+        self.downstream_input.setButtonSymbols(QAbstractSpinBox.NoButtons)
+
         self.candidate_limit_input = QSpinBox()
         self.candidate_limit_input.setRange(1, 1000)
         self.candidate_limit_input.setValue(3)
@@ -173,6 +187,14 @@ class LocationPage(QWidget):
         row1.addSpacing(20)
         row1.addWidget(make_param_label("最小比对长度:"))
         row1.addWidget(self.min_aln_len_input)
+        row1.addWidget(make_param_label("bp"))
+        row1.addSpacing(20)
+        row1.addWidget(make_param_label("查询上游延伸:"))
+        row1.addWidget(self.upstream_input)
+        row1.addWidget(make_param_label("bp"))
+        row1.addSpacing(20)
+        row1.addWidget(make_param_label("查询下游延伸:"))
+        row1.addWidget(self.downstream_input)
         row1.addWidget(make_param_label("bp"))
         row1.addStretch()
         param_layout.addRow(row1)
@@ -321,6 +343,8 @@ class LocationPage(QWidget):
         # 创建处理器
         identity = self.identity_input.value()
         min_aln_len = self.min_aln_len_input.value()
+        upstream = self.upstream_input.value()
+        downstream = self.downstream_input.value()
         pairwise_all = self.pairwise_all_input.isChecked()
         candidate_limit = None if pairwise_all else self.candidate_limit_input.value()
         db = get_database()
@@ -355,6 +379,8 @@ class LocationPage(QWidget):
             ref_gff=ref_genome.get("annotation_path"),
             qry_gff=qry_genome.get("annotation_path"),
             min_aln_len=min_aln_len,
+            upstream=upstream,
+            downstream=downstream,
             query_genomes=qry_genomes,
             candidate_limit=candidate_limit,
             pairwise_all=pairwise_all

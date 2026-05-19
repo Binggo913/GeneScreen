@@ -801,7 +801,8 @@ class GeneIDProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all, self.merge_gap, self.min_aln_len
+            self.identity, self.candidate_limit, self.pairwise_all,
+            self.merge_gap, self.min_aln_len
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
@@ -861,6 +862,8 @@ class LocationProcessor:
         min_aln_len: int = 100,
         merge_gap: int = 1000,
         query_genomes: Optional[List[Dict[str, Any]]] = None,
+        upstream: int = 0,
+        downstream: int = 0,
         candidate_limit: Optional[int] = 3,
         pairwise_all: bool = False,
     ):
@@ -875,6 +878,8 @@ class LocationProcessor:
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.upstream = upstream
+        self.downstream = downstream
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         self.genome_files = {
@@ -910,11 +915,14 @@ class LocationProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = _precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all, self.merge_gap, self.min_aln_len
+            self.identity, self.candidate_limit, self.pairwise_all,
+            self.merge_gap, self.min_aln_len, self.upstream, self.downstream
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
         result["merge_gap"] = self.merge_gap
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         return result
 
     def process(
@@ -947,6 +955,8 @@ class LocationProcessor:
         result["qry_name"] = self.qry_name
         result["identity"] = self.identity
         result["min_aln_len"] = self.min_aln_len
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         result["genome_files"] = self.genome_files
 
         return result

@@ -982,7 +982,7 @@ class GeneIDProcessor:
 class LocationProcessor:
     """Location 模式处理器"""
 
-    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None, candidate_limit=3, pairwise_all=False):
+    def __init__(self, ref_genome, query_genome, output_dir, ref_name="", qry_name="", identity=90, ref_gff=None, qry_gff=None, min_aln_len=100, merge_gap=1000, query_entries=None, upstream=0, downstream=0, candidate_limit=3, pairwise_all=False):
         self.extractor = SequenceExtractor(ref_genome, None, output_dir)
         self.aligner = BlastAligner(output_dir)
         self.ref_genome = ref_genome
@@ -994,6 +994,8 @@ class LocationProcessor:
         self.identity = identity
         self.min_aln_len = min_aln_len
         self.merge_gap = merge_gap
+        self.upstream = upstream
+        self.downstream = downstream
         self.candidate_limit = candidate_limit
         self.pairwise_all = pairwise_all
         # 保存基因组文件路径
@@ -1031,11 +1033,14 @@ class LocationProcessor:
         result["queries"] = self.query_entries
         result["pairwise_results"] = precompute_pairwise(
             query_results, self.query_entries, self.aligner, self.output_dir,
-            self.identity, self.candidate_limit, self.pairwise_all, self.merge_gap, self.min_aln_len
+            self.identity, self.candidate_limit, self.pairwise_all,
+            self.merge_gap, self.min_aln_len, self.upstream, self.downstream
         )
         result["candidate_limit"] = self.candidate_limit
         result["pairwise_all"] = self.pairwise_all
         result["merge_gap"] = self.merge_gap
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
         return result
 
     def process(self, chrom, start, end, name=None):
@@ -1057,6 +1062,8 @@ class LocationProcessor:
         result["fasta"] = fasta_file
         result["id"] = loc_name
         result["location"] = f"{chrom}:{start}-{end}"  # 保存原始位置信息
+        result["query_upstream"] = self.upstream
+        result["query_downstream"] = self.downstream
 
         # 可视化（传递 min_aln_len, merge_gap, ref_index_file）
         visualizer = LocationVisualizer(
@@ -1350,18 +1357,18 @@ def main():
         help="query-query 预计算使用所有通过阈值的候选，覆盖 --candidate-limit",
     )
 
-    # Gene ID 模式专用参数：上下游延伸
+    # 上下游延伸
     parser.add_argument(
         "-u", "--upstream",
         type=int,
         default=0,
-        help="上游延伸长度 bp（Gene ID 为参考基因，Sequence 为查询命中片段，默认: 0）",
+        help="上游延伸长度 bp（Gene ID 为参考基因；Location/Sequence 为查询命中片段，默认: 0）",
     )
     parser.add_argument(
         "-d", "--downstream",
         type=int,
         default=0,
-        help="下游延伸长度 bp（Gene ID 为参考基因，Sequence 为查询命中片段，默认: 0）",
+        help="下游延伸长度 bp（Gene ID 为参考基因；Location/Sequence 为查询命中片段，默认: 0）",
     )
 
     # 输出
@@ -1468,10 +1475,6 @@ def main():
         if not query_entries:
             raise ValueError("Location 模式需要指定 -qry 目标基因组")
 
-        # 提示 -u/-d 在 Location 模式下无效
-        if args.upstream > 0 or args.downstream > 0:
-            print(f"[WARNING] -u/-d 参数仅在 Gene ID 模式下有效，当前 Location 模式将忽略这些参数")
-
         resolved_queries = [
             _resolve_genome_entry(entry, role="目标基因组")
             for entry in query_entries
@@ -1486,6 +1489,8 @@ def main():
             ref_gff=ref_annotation, qry_gff=qry_annotation,
             min_aln_len=args.min_aln_len, merge_gap=args.merge_gap,
             query_entries=resolved_queries,
+            upstream=args.upstream,
+            downstream=args.downstream,
             candidate_limit=args.candidate_limit,
             pairwise_all=args.pairwise_all
         )

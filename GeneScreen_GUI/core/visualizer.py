@@ -4843,6 +4843,10 @@ class LocationVisualizer(BaseVisualizer):
             "Identity 阈值": f"{identity}%",
             "最小比对长度": f"{self.min_aln_len} bp"
         }
+        if result.get("query_upstream", 0) > 0:
+            params["查询上游延伸"] = f"{result.get('query_upstream')} bp"
+        if result.get("query_downstream", 0) > 0:
+            params["查询下游延伸"] = f"{result.get('query_downstream')} bp"
         html += self._generate_mode_section("Location", ref_genome, qry_genome, params, genome_files)
         
         # 输入文件模块（基因组文件）
@@ -4978,6 +4982,10 @@ class SequenceVisualizer(BaseVisualizer):
             "Identity 阈值": f"{identity}%",
             "最小比对长度": f"{self.min_aln_len} bp"
         }
+        if result.get("query_upstream", 0) > 0:
+            params["查询上游延伸"] = f"{result.get('query_upstream')} bp"
+        if result.get("query_downstream", 0) > 0:
+            params["查询下游延伸"] = f"{result.get('query_downstream')} bp"
         html += self._generate_mode_section("Sequence", ref_genome, None, params, genome_files)
         
         # 输入文件模块（包含参考基因组和用户输入的序列文件）
