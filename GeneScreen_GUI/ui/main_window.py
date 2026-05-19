@@ -630,6 +630,8 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Wheel:
+            if not self._is_popup_scroll_target(obj):
+                self._hide_open_popups()
             combo = self._combo_for_wheel_target(obj)
             if combo and self._suppress_combo_wheel(combo, event):
                 return True
@@ -672,6 +674,39 @@ class MainWindow(QMainWindow):
         self._scroll_nearest_parent(combo, event)
         event.accept()
         return True
+
+    def _install_scroll_popup_guards(self, root: QWidget) -> None:
+        for scroll_area in root.findChildren(QAbstractScrollArea):
+            if scroll_area.property("role") == "geneIdPopup":
+                continue
+            if scroll_area.property("_genescreenPopupGuardInstalled"):
+                continue
+            scroll_area.setProperty("_genescreenPopupGuardInstalled", True)
+            scroll_area.viewport().installEventFilter(self)
+            scroll_area.verticalScrollBar().valueChanged.connect(self._hide_open_popups)
+            scroll_area.horizontalScrollBar().valueChanged.connect(self._hide_open_popups)
+
+    def _hide_open_popups(self, *_args) -> None:
+        for combo in self.findChildren(QComboBox):
+            combo.hidePopup()
+            completer = combo.completer()
+            if completer and completer.popup():
+                completer.popup().hide()
+        for widget in self.findChildren(QWidget):
+            if widget.property("role") == "geneIdPopup":
+                widget.hide()
+
+    def _is_popup_scroll_target(self, obj) -> bool:
+        widget = obj if isinstance(obj, QWidget) else None
+        while widget:
+            if widget.property("role") == "geneIdPopup":
+                return True
+            for combo in self.findChildren(QComboBox):
+                view = combo.view()
+                if view and (widget is view or view.isAncestorOf(widget)):
+                    return True
+            widget = widget.parentWidget()
+        return False
 
     def _scroll_nearest_parent(self, widget: QWidget, event) -> None:
         parent = widget.parentWidget()
@@ -745,7 +780,9 @@ class MainWindow(QMainWindow):
         self._page_classes = None  # 延迟导入
         self._pages_loaded = [True, False, False, False, False, False]
         
-        self.page_stack.addWidget(GeneIDPage())  # 首页立即加载
+        first_page = GeneIDPage()
+        self.page_stack.addWidget(first_page)  # 首页立即加载
+        self._install_scroll_popup_guards(first_page)
         for _ in range(5):  # 其他页面用占位符
             self.page_stack.addWidget(QWidget())
         
@@ -769,6 +806,7 @@ class MainWindow(QMainWindow):
         self.page_stack.removeWidget(old_widget)
         old_widget.deleteLater()
         self.page_stack.insertWidget(index, new_widget)
+        self._install_scroll_popup_guards(new_widget)
         self._pages_loaded[index] = True
     
     def _switch_page(self, index: int):
