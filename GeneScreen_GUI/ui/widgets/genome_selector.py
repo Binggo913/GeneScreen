@@ -248,6 +248,8 @@ class GenomeSelector(QWidget):
         self.combo.setCurrentIndex(0)
         if not emit:
             self.combo.blockSignals(False)
+            if self.show_annotation:
+                self._clear_annotations()
         if emit:
             self.genome_changed.emit("", {})
     
@@ -543,6 +545,14 @@ class GenomePairSelector(QWidget):
         self._sync_selected_query_section()
         self._last_qry_name = name
         self.qry_changed.emit(name, genome)
+        self._clear_query_inputs_after_add()
+
+    def _clear_query_inputs_after_add(self):
+        if not self.qry_selector:
+            return
+        self._syncing_selection = True
+        self.qry_selector.clear_selection(emit=False)
+        self._syncing_selection = False
 
     def _remove_selected_query(self):
         if not self.multi_query or not hasattr(self, "qry_list"):
