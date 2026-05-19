@@ -809,6 +809,24 @@ class MainWindow(QMainWindow):
             return
         app.setPalette(build_palette(tokens))
 
+    def _refresh_theme_widgets(self):
+        app = QApplication.instance()
+        style = app.style() if app else self.style()
+        widgets = [self]
+        if hasattr(self, "window_root"):
+            widgets.append(self.window_root)
+            widgets.extend(self.window_root.findChildren(QWidget))
+
+        self.setUpdatesEnabled(False)
+        try:
+            for widget in widgets:
+                widget.style().unpolish(widget)
+                style.polish(widget)
+                widget.update()
+        finally:
+            self.setUpdatesEnabled(True)
+            self.update()
+
     def _apply_styles(self):
         """Apply theme without rebuilding the global stylesheet."""
         tokens = get_theme_tokens(self._dark_mode)
@@ -819,3 +837,5 @@ class MainWindow(QMainWindow):
         if hasattr(self, "window_root"):
             self.window_root.setProperty("theme", tokens.name)
             self.window_root.set_theme(tokens.theme_bg, tokens.theme_border, radius=12)
+
+        self._refresh_theme_widgets()
