@@ -848,7 +848,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Microsoft YaHei", sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
       line-height: 1.6;
       color: #333;
       background: #f5f5f5;
@@ -872,30 +872,35 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       justify-content: space-between;
       gap: 20px;
       align-items: flex-start;
+      flex-wrap: nowrap;
     }
     .header-left {
       display: flex;
       flex-direction: column;
       align-items: flex-start;
+      min-width: 0;
     }
     .header-right {
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 10px;
+      align-items: flex-start;
+      flex: 0 0 auto;
     }
     .header h1 { font-size: 24px; margin-bottom: 10px; }
     .subtitle {
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       align-items: center;
-      gap: 12px;
+      gap: 15px;
       opacity: 0.95;
       font-size: 14px;
+      min-width: 0;
     }
     .report-title {
       font-size: 13px;
       opacity: 0.9;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .gen-time { margin-top: 8px; font-size: 13px; opacity: 0.85; }
     .lang-switch {
@@ -931,19 +936,18 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-size: 12px;
       font-weight: 600;
       text-transform: uppercase;
-      background: rgba(255,255,255,0.22);
-      color: white;
+      flex: 0 0 auto;
     }
+    .mode-geneid { background: #e3f2fd; color: #1976d2; }
+    .mode-location { background: #f3e5f5; color: #7b1fa2; }
+    .mode-sequence { background: #e8f5e9; color: #388e3c; }
     .json-badge {
-      display: inline-block;
-      color: rgba(255,255,255,0.92);
-      border: 1px solid rgba(255,255,255,0.35);
-      border-radius: 6px;
-      padding: 5px 10px;
+      color: rgba(255,255,255,0.85);
       font-size: 12px;
-      text-decoration: none;
+      text-decoration: underline;
+      white-space: nowrap;
     }
-    .json-badge:hover { background: rgba(255,255,255,0.1); }
+    .json-badge:hover { color: white; }
     .section { padding: 25px 30px; border-bottom: 1px solid #eee; }
     .section:last-child { border-bottom: none; }
     .section h2 {
@@ -1174,8 +1178,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     @media (max-width: 900px) {
       body { padding: 10px; }
-      .header-content, .detail-layout { display: block; }
-      .header-right { align-items: flex-start; margin-top: 14px; }
+      .detail-layout { display: block; }
+      .header { padding: 24px 20px; }
+      .header-content { gap: 12px; }
+      .subtitle { gap: 10px; }
+      .report-title { max-width: 42vw; }
       .section { padding: 20px 16px; }
       .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
       .overview-track { grid-template-columns: 120px minmax(420px, 1fr); }
@@ -1191,8 +1198,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         <h1 data-zh="GeneScreen 比对分析报告" data-en="GeneScreen Alignment Analysis Report">GeneScreen 比对分析报告</h1>
         <div class="subtitle">
           <span class="mode-badge" id="modeBadge">GeneScreen</span>
-          <span id="reportScope" data-zh="1 ref + N query 比对报告" data-en="1 ref + N query alignment report">1 ref + N query 比对报告</span>
           <span class="report-title" data-zh="输入：__TITLE__" data-en="Input: __TITLE__">输入：__TITLE__</span>
+          <a class="json-badge" href="data.json" data-zh="data.json" data-en="data.json">data.json</a>
         </div>
         <div class="gen-time" id="generatedAt"></div>
       </div>
@@ -1201,7 +1208,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           <button class="lang-btn active" data-lang="zh" onclick="switchLang('zh')">中文</button>
           <button class="lang-btn" data-lang="en" onclick="switchLang('en')">EN</button>
         </div>
-        <a class="json-badge" href="data.json" data-zh="结构化数据 data.json" data-en="Structured data.json">结构化数据 data.json</a>
       </div>
     </div>
   </div>
@@ -1316,6 +1322,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (normalized.includes('sequence')) return t('sequenceMode');
       return raw;
     }
+    function modeClass(mode) {
+      const normalized = String(mode || '').toLowerCase().replace(/[\s-]+/g, '_');
+      if (normalized.includes('gene_id')) return 'mode-geneid';
+      if (normalized.includes('location')) return 'mode-location';
+      if (normalized.includes('sequence')) return 'mode-sequence';
+      return 'mode-geneid';
+    }
     function applyStaticLang() {
       document.documentElement.lang = currentLang === 'en' ? 'en' : 'zh-CN';
       document.querySelectorAll('.lang-btn').forEach(btn => {
@@ -1399,7 +1412,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       return String(type || '').toUpperCase() === 'SNP' ? 'snp' : 'indel';
     }
     function renderHeader() {
-      document.getElementById('modeBadge').textContent = modeText(reportData.mode);
+      const modeBadge = document.getElementById('modeBadge');
+      modeBadge.textContent = modeText(reportData.mode);
+      modeBadge.className = `mode-badge ${modeClass(reportData.mode)}`;
       const generatedText = reportData.generated_at ? `${t('generatedAt')}: ${reportData.generated_at}` : '';
       document.getElementById('generatedAt').textContent = generatedText;
     }
