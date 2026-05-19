@@ -630,8 +630,6 @@ class MainWindow(QMainWindow):
 
     def eventFilter(self, obj, event):
         if event.type() == QEvent.Wheel:
-            if not self._is_popup_scroll_target(obj):
-                self._hide_open_popups()
             combo = self._combo_for_wheel_target(obj)
             if combo and self._suppress_combo_wheel(combo, event):
                 return True
@@ -683,30 +681,35 @@ class MainWindow(QMainWindow):
                 continue
             scroll_area.setProperty("_genescreenPopupGuardInstalled", True)
             scroll_area.viewport().installEventFilter(self)
-            scroll_area.verticalScrollBar().valueChanged.connect(self._hide_open_popups)
-            scroll_area.horizontalScrollBar().valueChanged.connect(self._hide_open_popups)
+            scroll_area.verticalScrollBar().valueChanged.connect(self._reposition_open_popups)
+            scroll_area.horizontalScrollBar().valueChanged.connect(self._reposition_open_popups)
 
-    def _hide_open_popups(self, *_args) -> None:
+    def _reposition_open_popups(self, *_args) -> None:
         for combo in self.findChildren(QComboBox):
-            combo.hidePopup()
-            completer = combo.completer()
-            if completer and completer.popup():
-                completer.popup().hide()
+            view = combo.view()
+            if view and view.isVisible():
+                if combo.isVisible() and self._widget_has_visible_rect(combo):
+                    popup = view.window()
+                    popup.move(combo.mapToGlobal(combo.rect().bottomLeft()))
+                    popup.resize(max(combo.width(), popup.width()), popup.height())
+                else:
+                    combo.hidePopup()
+
         for widget in self.findChildren(QWidget):
-            if widget.property("role") == "geneIdPopup":
+            if widget.property("role") != "geneIdPopup" or not widget.isVisible():
+                continue
+            owner = widget.parentWidget()
+            anchor = getattr(owner, "gene_id_input", owner) if owner else None
+            if owner and hasattr(owner, "_show_gene_id_popup") and self._widget_has_visible_rect(anchor):
+                owner._show_gene_id_popup()
+            else:
                 widget.hide()
 
-    def _is_popup_scroll_target(self, obj) -> bool:
-        widget = obj if isinstance(obj, QWidget) else None
-        while widget:
-            if widget.property("role") == "geneIdPopup":
-                return True
-            for combo in self.findChildren(QComboBox):
-                view = combo.view()
-                if view and (widget is view or view.isAncestorOf(widget)):
-                    return True
-            widget = widget.parentWidget()
-        return False
+    def _widget_has_visible_rect(self, widget: QWidget) -> bool:
+        if not widget or not widget.isVisible():
+            return False
+        center = widget.rect().center()
+        return widget.visibleRegion().contains(center)
 
     def _scroll_nearest_parent(self, widget: QWidget, event) -> None:
         parent = widget.parentWidget()

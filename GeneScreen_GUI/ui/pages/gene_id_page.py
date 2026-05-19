@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QFormLayout,
     QSpinBox, QMessageBox, QFileDialog,
     QComboBox, QCompleter, QAbstractSpinBox, QListWidget, QListWidgetItem,
-    QCheckBox, QSizePolicy, QScrollArea
+    QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import (
     QThread, Signal, Qt, QTimer, QAbstractListModel,
@@ -223,7 +223,6 @@ class GeneIDPage(QWidget):
         self._popup_list.setFocusPolicy(Qt.NoFocus)
         self._popup_list.itemClicked.connect(self._on_popup_item_clicked)
         self._popup_list.hide()
-        self._install_scroll_popup_guards()
         
         self._set_gene_id_loading_state(self.REF_REQUIRED_PLACEHOLDER)
         
@@ -543,12 +542,6 @@ class GeneIDPage(QWidget):
         self._popup_list.hide()
         self.gene_id_input.setFocus()
 
-    def _install_scroll_popup_guards(self):
-        """Hide the in-page gene ID popup when the page scrolls."""
-        for scroll_area in self.findChildren(QScrollArea):
-            scroll_area.viewport().installEventFilter(self)
-            scroll_area.verticalScrollBar().valueChanged.connect(self._popup_list.hide)
-
     def _show_gene_id_popup(self):
         """显示选择框"""
         if not self._gene_id_all_ids:
@@ -603,8 +596,6 @@ class GeneIDPage(QWidget):
             elif event.type() == QEvent.FocusOut:
                 # 延迟隐藏，让点击事件先处理
                 QTimer.singleShot(200, self._hide_popup_if_no_focus)
-        elif event.type() == QEvent.Wheel and self._popup_list.isVisible():
-            self._popup_list.hide()
         return super().eventFilter(obj, event)
 
     def _hide_popup_if_no_focus(self):

@@ -735,4 +735,12 @@ QStatusBar {
     background: palette(button);
     color: palette(text);
 }
+
+QToolTip {
+    background-color: palette(base);
+    color: palette(window-text);
+    border: 1px solid palette(dark);
+    border-radius: 4px;
+    padding: 4px 8px;
+}
 """
