@@ -684,11 +684,13 @@ class GenomeManagerPage(QWidget):
             delete_files = delete_files_checkbox.isChecked()
             cache_dir = Path(get_genome_manager().cache_dir).resolve()
             for name in selected_names:
+                genome = db.get_genome(name)
+                deleted = db.delete_genome(name)
+                if not deleted:
+                    continue
                 if delete_files:
-                    genome = db.get_genome(name)
                     if genome:
                         self._delete_genome_files(genome, cache_dir)
-                db.delete_genome(name)
             self._load_genomes()
 
     def _get_selected_names(self) -> list:

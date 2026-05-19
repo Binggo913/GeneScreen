@@ -264,13 +264,33 @@ class Database:
 
     def delete_genome(self, name: str) -> bool:
         """删除基因组"""
+        history_updated = False
         with self.connection() as conn:
+            genome_cursor = conn.execute(
+                'SELECT id FROM genomes WHERE name = ?', (name,)
+            )
+            genome = genome_cursor.fetchone()
+            if not genome:
+                return False
+
+            genome_id = genome["id"]
+            ref_cursor = conn.execute(
+                'UPDATE analysis_history SET ref_genome_id = NULL WHERE ref_genome_id = ?',
+                (genome_id,)
+            )
+            qry_cursor = conn.execute(
+                'UPDATE analysis_history SET qry_genome_id = NULL WHERE qry_genome_id = ?',
+                (genome_id,)
+            )
+            history_updated = (ref_cursor.rowcount + qry_cursor.rowcount) > 0
             cursor = conn.execute(
                 'DELETE FROM genomes WHERE name = ?', (name,)
             )
             deleted = cursor.rowcount > 0
         if deleted:
             self._notify_genomes_changed()
+        if history_updated:
+            self._notify_history_changed()
         return deleted
 
     def genome_exists(self, name: str) -> bool:
