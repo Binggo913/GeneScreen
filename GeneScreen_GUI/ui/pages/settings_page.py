@@ -5,13 +5,22 @@ from pathlib import Path
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QGroupBox, QFormLayout, QFileDialog, QMessageBox
+    QPushButton, QGroupBox, QFormLayout, QFileDialog, QMessageBox,
+    QSpinBox
 )
 from PySide6.QtCore import Qt
 
-from core.config import get_db_dir, set_db_dir, get_output_dir, set_output_dir
+from core.config import (
+    get_analysis_thread_count,
+    get_db_dir,
+    get_output_dir,
+    set_analysis_thread_count,
+    set_db_dir,
+    set_output_dir,
+)
 from core.database import get_database
 from core.genome_manager import get_genome_manager
+from core.task_manager import get_analysis_task_manager
 
 
 class SettingsPage(QWidget):
@@ -91,6 +100,23 @@ class SettingsPage(QWidget):
 
         layout.addWidget(output_group)
 
+        analysis_group = QGroupBox("分析任务")
+        analysis_layout = QFormLayout(analysis_group)
+
+        self.analysis_threads_input = QSpinBox()
+        self.analysis_threads_input.setRange(1, 32)
+        self.analysis_threads_input.setValue(get_analysis_thread_count())
+        self.analysis_threads_input.setFixedWidth(100)
+        self.analysis_threads_input.setProperty("paramInput", True)
+        self.analysis_threads_input.valueChanged.connect(self._save_analysis_settings)
+        analysis_layout.addRow("分析任务线程数:", self.analysis_threads_input)
+
+        analysis_hint = QLabel("默认 1；控制后台同时 Running 的分析任务数量。")
+        analysis_hint.setProperty("role", "muted")
+        analysis_layout.addRow("", analysis_hint)
+
+        layout.addWidget(analysis_group)
+
     def _browse_db_dir(self):
         current = self.db_path_input.text().strip()
         start_dir = current if current else str(get_db_dir())
@@ -140,3 +166,7 @@ class SettingsPage(QWidget):
         set_output_dir(output_dir)
         self._last_saved_output_path = str(output_dir)
         QMessageBox.information(self, "已保存", "结果输出路径已更新。")
+
+    def _save_analysis_settings(self, value: int):
+        set_analysis_thread_count(value)
+        get_analysis_task_manager().set_max_running(value)

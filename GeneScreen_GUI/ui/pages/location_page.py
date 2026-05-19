@@ -22,6 +22,7 @@ from ui.widgets.analysis_layout import (
     create_scroll_content,
 )
 from core import LocationProcessor, get_genome_manager, get_database
+from core.task_manager import AnalysisTask, get_analysis_task_manager
 from ui.widgets.report_worker import ReportWorker
 from core.config import get_output_dir
 
@@ -231,7 +232,7 @@ class LocationPage(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         
-        self.run_btn = QPushButton("🚀 开始分析")
+        self.run_btn = QPushButton("🚀 提交分析")
         self.run_btn.setProperty("primaryAction", True)
         self.run_btn.setMinimumWidth(150)
         self.run_btn.setMinimumHeight(45)
@@ -364,10 +365,12 @@ class LocationPage(QWidget):
                 input_value=loc_label,
                 identity=identity,
                 output_dir=item_output_dir,
-                status="running"
+                status="pending"
             )
             self._history_map[loc_label] = history_id
             self._output_dir_map[loc_label] = item_output_dir
+        history_map = dict(self._history_map)
+        output_dir_map = dict(self._output_dir_map)
 
         processor = LocationProcessor(
             ref_genome=ref_genome["fasta_path"],
@@ -386,61 +389,70 @@ class LocationPage(QWidget):
             pairwise_all=pairwise_all
         )
         
-        # 启动分析线程
-        self.run_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)
+        # 提交到后台任务队列
+        self.progress_label.setText("已提交后台队列")
+        self.progress_bar.setVisible(False)
         
         output_dir_builder = None
         if multi_mode:
             def output_dir_builder(loc: dict) -> str:
                 name = loc.get("file_tag") or f"{loc['chrom']}_{loc['start']}_{loc['end']}"
                 safe_name = self._sanitize_path_segment(name) or "location"
-                return os.path.join(output_dir, safe_name)
+                loc_label = loc.get("label") or f"{loc['chrom']}:{loc['start']}-{loc['end']}"
+                return output_dir_map.get(loc_label, os.path.join(output_dir, safe_name))
         self.analysis_thread = LocationAnalysisThread(processor, locations, output_dir_builder=output_dir_builder)
+        self.analysis_thread.history_map = history_map
+        self.analysis_thread.output_dir_map = output_dir_map
+        self.analysis_thread.batch_mode = multi_mode
+        self.analysis_thread.ref_name = ref_genome.get("name", "")
+        self.analysis_thread.qry_name = qry_genome.get("name", "")
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
         self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
-        self.analysis_thread.start()
+        history_ids = list(history_map.values())
+
+        def on_started():
+            self.progress_label.setText("后台任务执行中...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+
+        get_analysis_task_manager().submit(
+            AnalysisTask(
+                thread=self.analysis_thread,
+                history_ids=history_ids,
+                label=f"Location: {len(locations)} item(s)",
+                on_started=on_started,
+            )
+        )
     
     def _on_analysis_finished(self, success: bool, result: dict, message: str):
         """分析完成回调"""
-        self.run_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.progress_label.setText(message)
         
-        if success:
-            if self._batch_mode:
-                QMessageBox.information(self, "分析完成", f"{message}\n\n报告生成中...")
-            else:
-                if self._report_worker or self._report_queue:
-                    self._pending_finish_message = message
-                elif self._last_report_path:
-                    QMessageBox.information(
-                        self, "分析完成",
-                        f"{message}\n\n报告已保存到:\n{self._last_report_path}"
-                    )
-                else:
-                    QMessageBox.information(self, "分析完成", message)
-        else:
+        if not success:
             QMessageBox.warning(self, "分析失败", message)
 
     def _on_item_finished(self, loc_key: str, result: object, error: str):
-        history_id = self._history_map.get(loc_key)
+        sender = self.sender()
+        history_map = getattr(sender, "history_map", self._history_map)
+        output_dir_map = getattr(sender, "output_dir_map", self._output_dir_map)
+        history_id = history_map.get(loc_key)
         if not history_id:
             return
         db = get_database()
         if result:
-            output_dir = self._output_dir_map.get(loc_key, "") or result.get("output_dir", "")
-            ref_name = self.genome_selector.get_ref_genome().get("name", "")
-            qry_name = self.genome_selector.get_qry_genome().get("name", "")
+            output_dir = output_dir_map.get(loc_key, "") or result.get("output_dir", "")
+            ref_name = getattr(sender, "ref_name", "") or self.genome_selector.get_ref_genome().get("name", "")
+            qry_name = getattr(sender, "qry_name", "") or self.genome_selector.get_qry_genome().get("name", "")
             job = {
                 "history_id": history_id,
                 "result": result,
                 "output_dir": output_dir,
                 "mode": "location",
                 "ref_name": ref_name,
-                "qry_name": qry_name
+                "qry_name": qry_name,
+                "batch_mode": getattr(sender, "batch_mode", self._batch_mode),
             }
             self._enqueue_report_job(job)
         else:
@@ -489,7 +501,7 @@ class LocationPage(QWidget):
                 report_path=report_path,
                 output_dir=output_dir
             )
-            if not self._batch_mode:
+            if not job.get("batch_mode", self._batch_mode):
                 self._last_report_path = report_path
         else:
             db.update_history(history_id, status="failed")

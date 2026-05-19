@@ -83,17 +83,18 @@ class HistoryPage(QWidget):
         
         # 历史表格
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(6)
+        self.history_table.setColumnCount(7)
         self.history_table.setHorizontalHeaderLabels([
-            "", "ID", "模式", "时间", "报告", "结果路径"
+            "", "ID", "模式", "时间", "状态", "报告", "结果路径"
         ])
         self.history_table.setIconSize(QSize(18, 18))
         self.history_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
         self.history_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.Stretch)
+        self.history_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.history_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Stretch)
+        self.history_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Stretch)
         self.history_table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
         self.history_table.verticalHeader().setVisible(False)
         self.history_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
@@ -263,6 +264,9 @@ class HistoryPage(QWidget):
                 self.history_table.item(i, 3).flags() & ~Qt.ItemIsEditable
             )
 
+            status_item = self._make_status_item(record.get("status", ""))
+            self.history_table.setItem(i, 4, status_item)
+
             report_path = record.get("report_path", "") or "-"
             report_display = self._format_path_display(report_path)
             report_item = QTableWidgetItem(report_display)
@@ -275,7 +279,7 @@ class HistoryPage(QWidget):
             else:
                 report_item.setForeground(QColor("#999999"))
             report_item.setFlags(report_item.flags() & ~Qt.ItemIsEditable)
-            self.history_table.setItem(i, 4, report_item)
+            self.history_table.setItem(i, 5, report_item)
 
             output_dir = record.get("output_dir", "") or "-"
             output_display = self._format_path_display(output_dir)
@@ -289,7 +293,7 @@ class HistoryPage(QWidget):
             else:
                 output_item.setForeground(QColor("#999999"))
             output_item.setFlags(output_item.flags() & ~Qt.ItemIsEditable)
-            self.history_table.setItem(i, 5, output_item)
+            self.history_table.setItem(i, 6, output_item)
             
             # 存储完整记录
             self.history_table.item(i, 1).setData(Qt.UserRole, record)
@@ -303,8 +307,27 @@ class HistoryPage(QWidget):
                 if checkbox:
                     checkbox.setChecked(not checkbox.isChecked())
             return
-        if column in (4, 5):
+        if column in (5, 6):
             self._open_result(row, column)
+
+    def _make_status_item(self, status: str) -> QTableWidgetItem:
+        status = (status or "pending").lower()
+        label_map = {
+            "completed": "✓ 已完成",
+            "running": "Running",
+            "pending": "Pending",
+            "failed": "Failed",
+        }
+        item = QTableWidgetItem(label_map.get(status, status))
+        color_map = {
+            "completed": QColor("#16a34a"),
+            "running": QColor("#2563eb"),
+            "pending": QColor("#8a6d3b"),
+            "failed": QColor("#dc2626"),
+        }
+        item.setForeground(color_map.get(status, QColor("#606266")))
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        return item
 
     def _on_history_changed(self):
         if not self._syncing_history:
@@ -363,14 +386,14 @@ class HistoryPage(QWidget):
         report_path = record.get("report_path", "")
         output_dir = record.get("output_dir", "")
 
-        if column == 4:
+        if column == 5:
             if report_path and os.path.exists(report_path):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(report_path))
                 return
             QMessageBox.warning(self, "提示", "报告文件不存在或未记录")
             return
 
-        if column == 5:
+        if column == 6:
             if output_dir and os.path.exists(output_dir):
                 QDesktopServices.openUrl(QUrl.fromLocalFile(output_dir))
                 return

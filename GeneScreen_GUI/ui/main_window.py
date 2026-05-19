@@ -17,6 +17,7 @@ import ctypes
 from pathlib import Path
 
 from utils.blast_check import check_blast_installation
+from core.task_manager import get_analysis_task_manager
 
 
 class SidebarButton(QPushButton):
@@ -583,6 +584,26 @@ class MainWindow(QMainWindow):
         if event.type() == QEvent.WindowStateChange:
             self._update_maximize_button_icon()
         super().changeEvent(event)
+
+    def closeEvent(self, event):
+        task_manager = get_analysis_task_manager()
+        if task_manager.has_tasks():
+            reply = QMessageBox.warning(
+                self,
+                "仍有分析任务",
+                (
+                    f"当前仍有 {task_manager.running_count()} 个 Running 任务、"
+                    f"{task_manager.pending_count()} 个 Pending 任务。\n\n"
+                    "关闭软件会中断正在执行或排队的分析任务，是否继续关闭？"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                event.ignore()
+                return
+            task_manager.mark_unfinished_failed()
+        super().closeEvent(event)
 
     def showEvent(self, event):
         super().showEvent(event)

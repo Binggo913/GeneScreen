@@ -25,6 +25,7 @@ from ui.widgets.analysis_layout import (
     create_scroll_content,
 )
 from core import GeneIDProcessor, get_database, get_genome_manager
+from core.task_manager import AnalysisTask, get_analysis_task_manager
 from ui.widgets.report_worker import ReportWorker
 from core.gene_id_utils import load_gene_ids
 from core.config import get_output_dir
@@ -362,7 +363,7 @@ class GeneIDPage(QWidget):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         
-        self.run_btn = QPushButton("🚀 开始分析")
+        self.run_btn = QPushButton("🚀 提交分析")
         self.run_btn.setProperty("primaryAction", True)
         self.run_btn.setMinimumWidth(150)
         self.run_btn.setMinimumHeight(45)
@@ -855,10 +856,12 @@ class GeneIDPage(QWidget):
                 input_value=gene_id,
                 identity=identity,
                 output_dir=item_output_dir,
-                status="running"
+                status="pending"
             )
             self._history_map[gene_id] = history_id
             self._output_dir_map[gene_id] = item_output_dir
+        history_map = dict(self._history_map)
+        output_dir_map = dict(self._output_dir_map)
 
         processor = GeneIDProcessor(
             ref_genome=ref_genome["fasta_path"],
@@ -877,59 +880,67 @@ class GeneIDPage(QWidget):
             pairwise_all=pairwise_all
         )
         
-        # 启动分析线程
-        self.run_btn.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 不确定进度
+        # 提交到后台任务队列
+        self.progress_label.setText("已提交后台队列")
+        self.progress_bar.setVisible(False)
         
         output_dir_builder = None
         if multi_mode:
             def output_dir_builder(gene_id: str) -> str:
-                return self._output_dir_map.get(gene_id, output_dir)
+                return output_dir_map.get(gene_id, output_dir)
         self.analysis_thread = AnalysisThread(processor, gene_ids, output_dir_builder=output_dir_builder)
+        self.analysis_thread.history_map = history_map
+        self.analysis_thread.output_dir_map = output_dir_map
+        self.analysis_thread.batch_mode = multi_mode
+        self.analysis_thread.ref_name = ref_genome.get("name", "")
+        self.analysis_thread.qry_name = qry_genome.get("name", "")
         self.analysis_thread.progress.connect(lambda msg: self.progress_label.setText(msg))
         self.analysis_thread.item_finished.connect(self._on_item_finished)
         self.analysis_thread.finished.connect(self._on_analysis_finished)
-        self.analysis_thread.start()
+        history_ids = list(history_map.values())
+
+        def on_started():
+            self.progress_label.setText("后台任务执行中...")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+
+        get_analysis_task_manager().submit(
+            AnalysisTask(
+                thread=self.analysis_thread,
+                history_ids=history_ids,
+                label=f"Gene ID: {len(gene_ids)} item(s)",
+                on_started=on_started,
+            )
+        )
     
     def _on_analysis_finished(self, success: bool, result: dict, message: str):
         """分析完成回调"""
-        self.run_btn.setEnabled(True)
         self.progress_bar.setVisible(False)
         self.progress_label.setText(message)
         
-        if success:
-            if self._batch_mode:
-                QMessageBox.information(self, "分析完成", f"{message}\n\n报告生成中...")
-            else:
-                if self._report_worker or self._report_queue:
-                    self._pending_finish_message = message
-                elif self._last_report_path:
-                    QMessageBox.information(
-                        self, "分析完成",
-                        f"{message}\n\n报告已保存到:\n{self._last_report_path}"
-                    )
-                else:
-                    QMessageBox.information(self, "分析完成", message)
-        else:
+        if not success:
             QMessageBox.warning(self, "分析失败", message)
 
     def _on_item_finished(self, gene_id: str, result: object, error: str):
-        history_id = self._history_map.get(gene_id)
+        sender = self.sender()
+        history_map = getattr(sender, "history_map", self._history_map)
+        output_dir_map = getattr(sender, "output_dir_map", self._output_dir_map)
+        history_id = history_map.get(gene_id)
         if not history_id:
             return
         db = get_database()
         if result:
-            output_dir = self._output_dir_map.get(gene_id, "") or result.get("output_dir", "")
-            ref_name = self.genome_selector.get_ref_genome().get("name", "")
-            qry_name = self.genome_selector.get_qry_genome().get("name", "")
+            output_dir = output_dir_map.get(gene_id, "") or result.get("output_dir", "")
+            ref_name = getattr(sender, "ref_name", "") or self.genome_selector.get_ref_genome().get("name", "")
+            qry_name = getattr(sender, "qry_name", "") or self.genome_selector.get_qry_genome().get("name", "")
             job = {
                 "history_id": history_id,
                 "result": result,
                 "output_dir": output_dir,
                 "mode": "gene_id",
                 "ref_name": ref_name,
-                "qry_name": qry_name
+                "qry_name": qry_name,
+                "batch_mode": getattr(sender, "batch_mode", self._batch_mode),
             }
             self._enqueue_report_job(job)
         else:
@@ -978,7 +989,7 @@ class GeneIDPage(QWidget):
                 report_path=report_path,
                 output_dir=output_dir
             )
-            if not self._batch_mode:
+            if not job.get("batch_mode", self._batch_mode):
                 self._last_report_path = report_path
         else:
             db.update_history(history_id, status="failed")

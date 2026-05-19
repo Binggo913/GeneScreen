@@ -14,6 +14,7 @@ CONFIG_DIR = Path.home() / ".genescreen"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_DB_DIR = CONFIG_DIR / "genomes"
 DEFAULT_OUTPUT_DIR_NAME = "GeneScreenOutput"
+DEFAULT_ANALYSIS_THREAD_COUNT = 1
 
 
 def _load_config() -> Dict[str, Any]:
@@ -62,4 +63,19 @@ def get_output_dir() -> Path:
 def set_output_dir(path: str | Path) -> None:
     data = _load_config()
     data["output_dir"] = str(Path(path))
+    _save_config(data)
+
+
+def get_analysis_thread_count() -> int:
+    data = _load_config()
+    try:
+        value = int(data.get("analysis_thread_count", DEFAULT_ANALYSIS_THREAD_COUNT))
+    except (TypeError, ValueError):
+        value = DEFAULT_ANALYSIS_THREAD_COUNT
+    return max(1, min(value, 32))
+
+
+def set_analysis_thread_count(count: int) -> None:
+    data = _load_config()
+    data["analysis_thread_count"] = max(1, min(int(count), 32))
     _save_config(data)
