@@ -6,7 +6,7 @@ GeneScreen 1.0 - Sequence 模式页面
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QLabel,
     QPushButton, QTextEdit, QFormLayout,
-    QSpinBox, QProgressBar, QMessageBox, QFileDialog,
+    QSpinBox, QMessageBox, QFileDialog,
     QAbstractSpinBox, QLineEdit, QCheckBox
 )
 from PySide6.QtCore import QThread, Signal, Qt
@@ -256,10 +256,6 @@ class SequencePage(QWidget):
         self.progress_label.setProperty("role", "muted")
         layout.addWidget(self.progress_label)
         
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        layout.addWidget(self.progress_bar)
-        
         layout.addStretch()
     
     def _browse_output(self):
@@ -433,7 +429,6 @@ class SequencePage(QWidget):
         
         # 提交到后台任务队列
         self.progress_label.setText("已提交后台队列")
-        self.progress_bar.setVisible(False)
         
         output_dir_builder = None
         if multi_mode:
@@ -453,8 +448,6 @@ class SequencePage(QWidget):
 
         def on_started():
             self.progress_label.setText("后台任务执行中...")
-            self.progress_bar.setVisible(True)
-            self.progress_bar.setRange(0, 0)
 
         get_analysis_task_manager().submit(
             AnalysisTask(
@@ -522,7 +515,6 @@ class SequencePage(QWidget):
     
     def _on_analysis_finished(self, success: bool, result: dict, message: str):
         """分析完成回调"""
-        self.progress_bar.setVisible(False)
         self.progress_label.setText(message)
         
         if not success:
