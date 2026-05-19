@@ -6,7 +6,7 @@ PySide6 实现的桌面 GUI 主窗口
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QPushButton, QLabel, QFrame,
-    QMessageBox
+    QMessageBox, QComboBox, QAbstractScrollArea
 )
 from PySide6.QtCore import Qt, QSize, QEvent, QPoint, QPointF, QRect
 from PySide6.QtGui import QIcon, QColor, QPainter, QPen, QPixmap, QBrush, QPainterPath, QRegion, QPalette
@@ -606,6 +606,10 @@ class MainWindow(QMainWindow):
             pass
 
     def eventFilter(self, obj, event):
+        if event.type() == QEvent.Wheel and isinstance(obj, QComboBox):
+            if self._suppress_unfocused_combo_wheel(obj, event):
+                return True
+
         if self.isMaximized() or self.isFullScreen():
             return super().eventFilter(obj, event)
 
@@ -630,6 +634,33 @@ class MainWindow(QMainWindow):
                         self.windowHandle().startSystemResize(edges)
                         return True
         return super().eventFilter(obj, event)
+
+    def _suppress_unfocused_combo_wheel(self, combo: QComboBox, event) -> bool:
+        """Prevent accidental combo changes while wheel-scrolling pages."""
+        if combo.hasFocus() or combo.view().isVisible():
+            return False
+
+        self._scroll_nearest_parent(combo, event)
+        event.accept()
+        return True
+
+    def _scroll_nearest_parent(self, widget: QWidget, event) -> None:
+        parent = widget.parentWidget()
+        while parent:
+            if isinstance(parent, QAbstractScrollArea):
+                scroll_bar = parent.verticalScrollBar()
+                pixel_delta = event.pixelDelta().y()
+                angle_delta = event.angleDelta().y()
+                if pixel_delta:
+                    delta = pixel_delta
+                elif angle_delta:
+                    delta = int(angle_delta / 120 * scroll_bar.singleStep() * 3)
+                else:
+                    delta = 0
+                if delta:
+                    scroll_bar.setValue(scroll_bar.value() - delta)
+                return
+            parent = parent.parentWidget()
 
     def _hit_test_edges(self, global_pos: QPoint) -> Qt.Edges:
         rect = self.frameGeometry()
