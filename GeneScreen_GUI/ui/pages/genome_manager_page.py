@@ -682,15 +682,23 @@ class GenomeManagerPage(QWidget):
         if dialog.exec() == QDialog.Accepted:
             db = get_database()
             delete_files = delete_files_checkbox.isChecked()
-            cache_dir = Path(get_genome_manager().cache_dir).resolve()
+            manager = get_genome_manager()
+            cache_dir = Path(manager.cache_dir).resolve()
+            deleted_any = False
             for name in selected_names:
                 genome = db.get_genome(name)
-                deleted = db.delete_genome(name)
+                deleted = db.delete_genome(name, notify=False)
                 if not deleted:
                     continue
+                deleted_any = True
                 if delete_files:
-                    if genome:
-                        self._delete_genome_files(genome, cache_dir)
+                    if genome and not self._delete_genome_files(genome, cache_dir):
+                        manager.mark_cache_dir_ignored(genome)
+                elif genome:
+                    manager.mark_cache_dir_ignored(genome)
+            if deleted_any:
+                db._notify_genomes_changed()
+                db._notify_history_changed()
             self._load_genomes()
 
     def _get_selected_names(self) -> list:
@@ -705,7 +713,7 @@ class GenomeManagerPage(QWidget):
                         selected_names.append(name_item.data(Qt.UserRole))
         return selected_names
 
-    def _delete_genome_files(self, genome: dict, cache_dir: Path) -> None:
+    def _delete_genome_files(self, genome: dict, cache_dir: Path) -> bool:
         paths = []
         fasta_path = genome.get("fasta_path", "") or ""
         ann_path = genome.get("annotation_path", "") or ""
@@ -719,7 +727,7 @@ class GenomeManagerPage(QWidget):
 
         existing = [p for p in paths if p.exists()]
         if not existing:
-            return
+            return True
 
         delete_target = None
         for path in existing:
@@ -745,15 +753,17 @@ class GenomeManagerPage(QWidget):
         if delete_target:
             try:
                 shutil.rmtree(delete_target)
+                return True
             except Exception:
-                pass
-            return
+                return False
 
+        ok = True
         for path in existing:
             try:
                 path.unlink()
             except Exception:
-                pass
+                ok = False
+        return ok
 
     def _edit_selected(self):
         selected_names = self._get_selected_names()

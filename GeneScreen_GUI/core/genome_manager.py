@@ -44,6 +44,7 @@ ENSEMBL_FTP_BASE = "https://ftp.ensemblgenomes.ebi.ac.uk/pub/plants/current"
 # 文件扩展名
 FASTA_EXTS = ('.fa', '.fasta', '.fa.gz', '.fasta.gz')
 ANN_EXTS = ('.gff', '.gff3', '.gtf', '.gff.gz', '.gff3.gz', '.gtf.gz')
+IGNORE_MARKER = ".genescreen_ignore"
 
 # SSL 上下文（跳过证书验证，解决 Windows 兼容问题）
 SSL_CONTEXT = ssl.create_default_context()
@@ -132,6 +133,8 @@ class GenomeManager:
             # 跳过正在下载的目录
             if (f.parent / ".downloading").exists():
                 continue
+            if self._is_ignored_cache_path(f, root):
+                continue
             name_lower = f.name.lower()
             if any(name_lower.endswith(ext) for ext in FASTA_EXTS):
                 fasta_files.append(f)
@@ -163,6 +166,39 @@ class GenomeManager:
             }
 
         return list(genome_map.values())
+
+    def _is_ignored_cache_path(self, path: Path, root: Path) -> bool:
+        """Return True when a cached genome directory was explicitly removed from the library."""
+        root = root.resolve()
+        current = path.parent.resolve()
+        while True:
+            if (current / IGNORE_MARKER).exists():
+                return True
+            if current == root:
+                return False
+            if root not in current.parents:
+                return False
+            current = current.parent
+
+    def mark_cache_dir_ignored(self, genome: Dict[str, Any]) -> None:
+        """Prevent sync_cache_dir from re-importing a cached genome whose files remain on disk."""
+        paths = [
+            genome.get("fasta_path") or "",
+            genome.get("annotation_path") or "",
+            genome.get("gene_ids_path") or "",
+        ]
+        for raw_path in paths:
+            if not raw_path:
+                continue
+            path = Path(raw_path)
+            parent = path if path.is_dir() else path.parent
+            try:
+                resolved = parent.resolve()
+                if resolved != self.cache_dir.resolve() and self.cache_dir.resolve() in resolved.parents:
+                    (resolved / IGNORE_MARKER).write_text("Removed from GeneScreen genome library.\n", encoding="utf-8")
+                    return
+            except OSError:
+                continue
 
     def sync_cache_dir(self) -> Tuple[int, int]:
         """同步缓存目录，支持多注释版本"""
@@ -961,7 +997,7 @@ class GenomeManager:
             return False
 
         # 先删除数据库记录，确保基因组库立即生效；文件清理由后续步骤完成。
-        if not self.db.delete_genome(genome_id):
+        if not self.db.delete_genome(genome_id, notify=False):
             print(f"[ERROR] 删除基因组库记录失败: {genome_id}")
             return False
 
@@ -972,7 +1008,12 @@ class GenomeManager:
                 shutil.rmtree(genome_dir)
                 print(f"[INFO] 已删除文件: {genome_dir}")
             except Exception as e:
+                self.mark_cache_dir_ignored(genome)
                 print(f"[WARNING] 已删除基因组库记录，但文件删除失败: {genome_dir} ({e})")
+        else:
+            self.mark_cache_dir_ignored(genome)
+        self.db._notify_genomes_changed()
+        self.db._notify_history_changed()
         print(f"[INFO] 已删除基因组: {genome_id}")
         return True
 

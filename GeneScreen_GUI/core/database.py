@@ -262,7 +262,7 @@ class Database:
             self._notify_genomes_changed()
         return updated
 
-    def delete_genome(self, name: str) -> bool:
+    def delete_genome(self, name: str, notify: bool = True) -> bool:
         """删除基因组"""
         history_updated = False
         with self.connection() as conn:
@@ -287,9 +287,9 @@ class Database:
                 'DELETE FROM genomes WHERE name = ?', (name,)
             )
             deleted = cursor.rowcount > 0
-        if deleted:
+        if deleted and notify:
             self._notify_genomes_changed()
-        if history_updated:
+        if history_updated and notify:
             self._notify_history_changed()
         return deleted
 
