@@ -1114,16 +1114,58 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       border-radius: 8px;
       padding: 14px;
     }
-    .control-row {
+    .track-card-list { display: grid; gap: 10px; }
+    .control-row.track-card {
+      border: 1px solid #e3e6ef;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,.04);
+      overflow: hidden;
+    }
+    .control-row.track-card.dragging { opacity: .55; }
+    .track-card-summary {
+      display: grid;
+      grid-template-columns: 1fr 12px;
+      gap: 8px;
+      align-items: center;
+      min-height: 36px;
+      padding: 8px 10px;
+      cursor: grab;
+      list-style: none;
+      color: #333;
+      font-weight: 600;
+      font-size: 13px;
+    }
+    .track-card-summary::-webkit-details-marker { display: none; }
+    .track-card-name {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .track-card-toggle {
+      width: 0;
+      height: 0;
+      border-left: 5px solid transparent;
+      border-right: 5px solid transparent;
+      border-top: 6px solid #667eea;
+      transition: transform .15s ease;
+    }
+    .track-card:not([open]) .track-card-toggle { transform: rotate(-90deg); }
+    .track-card-body {
       display: grid;
       grid-template-columns: 1fr 32px 32px;
       gap: 6px;
-      margin-bottom: 10px;
       align-items: center;
+      padding: 0 10px 10px;
     }
-    .control-row[draggable="true"] { cursor: grab; }
-    .control-row.dragging { opacity: .55; }
-    select, .control-row button {
+    .track-card-meta {
+      min-height: 32px;
+      display: flex;
+      align-items: center;
+      color: #777;
+      font-size: 12px;
+    }
+    select, .track-card-body button {
       height: 32px;
       border: 1px solid #ddd;
       border-radius: 4px;
@@ -1131,34 +1173,31 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       color: #333;
     }
     select { width: 100%; padding: 0 8px; }
-    .control-row button { cursor: pointer; color: #667eea; font-weight: 600; }
-    .control-row button:hover { background: #f3f0ff; }
-    .track-stack { min-width: 760px; }
+    .track-card-body button { cursor: pointer; color: #667eea; font-weight: 600; }
+    .track-card-body button:hover { background: #f3f0ff; }
+    .track-stack { min-width: 0; }
     .detail-canvas {
-      min-width: 820px;
       border: 1px solid #e6e8ef;
       border-radius: 8px;
-      background: linear-gradient(180deg, #fff 0%, #fbfcff 100%);
-      overflow-x: auto;
+      background: #fff;
+      overflow: visible;
+      padding: 8px 0;
     }
     .detail-svg {
       display: block;
       width: 100%;
-      min-width: 820px;
       height: auto;
     }
-    .detail-track-bg { fill: #fff; }
-    .detail-track-bg:nth-of-type(even) { fill: #fafbff; }
-    .detail-label { font-size: 13px; font-weight: 600; fill: #333; }
-    .detail-subtext { font-size: 11px; fill: #777; }
-    .detail-axis { stroke: #252525; stroke-width: 3; stroke-linecap: round; }
+    .detail-label { font-family: Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #333; }
+    .detail-subtext { font-family: Arial, sans-serif; font-size: 11px; fill: #777; }
+    .detail-axis { stroke: #252525; stroke-width: 4; stroke-linecap: round; }
     .detail-axis-light { stroke: #a9b1c3; stroke-width: 1; }
-    .detail-block { fill: rgba(102,126,234,.18); stroke: rgba(102,126,234,.35); stroke-width: 1; }
-    .detail-block.reverse { fill: rgba(231,126,34,.16); stroke: rgba(231,126,34,.35); }
-    .detail-match { fill: #4f86d9; stroke: #2f5f9f; stroke-width: 1; }
+    .detail-block { fill: rgba(74,144,217,.18); stroke: rgba(74,144,217,.28); stroke-width: 1; }
+    .detail-block.reverse { fill: rgba(231,126,34,.16); stroke: rgba(231,126,34,.28); }
+    .detail-match { fill: #4a90d9; stroke: none; }
     .detail-ref-gene { fill: #667eea; stroke: #5364c9; stroke-width: 1; }
-    .detail-variant.snp { fill: #f39c12; stroke: #b76d00; }
-    .detail-variant.indel { fill: #2d9cdb; stroke: #176a95; }
+    .detail-variant.snp { fill: orange; stroke: #b76d00; }
+    .detail-variant.indel { fill: blue; stroke: #176a95; }
     .detail-empty {
       padding: 22px;
       border: 1px dashed #d9dce8;
@@ -1543,36 +1582,47 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function renderControls() {
       const root = document.getElementById('controls');
-      root.innerHTML = `<h3>${t('candidateSwitch')}</h3>`;
-      for (const qid of queryIds()) {
-        const track = trackById(qid);
-        const row = document.createElement('div');
-        row.className = 'control-row';
-        row.draggable = true;
-        row.dataset.trackId = qid;
-        const options = (reportData.candidates[qid] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[qid] === c.candidate_id ? 'selected' : ''}>${esc(track.name)} · ${esc(c.candidate_id)}</option>`).join('');
-        row.innerHTML = `<select>${options}</select><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
-        row.querySelector('select').onchange = e => { state.selected[qid] = e.target.value; renderOverview(); renderDetail(); };
-        row.children[1].onclick = () => moveTrack(qid, -1);
-        row.children[2].onclick = () => moveTrack(qid, 1);
+      root.innerHTML = `<h3>${t('candidateSwitch')}</h3><div class="track-card-list"></div>`;
+      const list = root.querySelector('.track-card-list');
+      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      for (const trackId of order) {
+        const track = trackById(trackId);
+        const row = document.createElement('details');
+        row.className = 'control-row track-card';
+        row.open = true;
+        row.dataset.trackId = trackId;
+        row.innerHTML = `<summary class="track-card-summary"><span class="track-card-name" title="${esc(track.name || trackId)}">${esc(track.name || trackId)}</span><span class="track-card-toggle"></span></summary><div class="track-card-body"></div>`;
+        const body = row.querySelector('.track-card-body');
+        if (trackId === 'ref') {
+          body.innerHTML = `<div class="track-card-meta">${t('reference')}</div><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
+        } else {
+          const options = (reportData.candidates[trackId] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`).join('');
+          body.innerHTML = `<select>${options}</select><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
+          body.querySelector('select').onchange = e => { state.selected[trackId] = e.target.value; renderOverview(); renderDetail(); };
+        }
+        body.querySelectorAll('button')[0].onclick = () => moveTrack(trackId, -1);
+        body.querySelectorAll('button')[1].onclick = () => moveTrack(trackId, 1);
         wireControlDrag(row);
-        root.appendChild(row);
+        list.appendChild(row);
       }
     }
     function moveTrack(trackId, delta) {
       const index = state.order.indexOf(trackId);
       const target = index + delta;
-      if (index <= 0 || target <= 0 || target >= state.order.length) return;
+      if (index < 0 || target < 0 || target >= state.order.length) return;
       state.order.splice(index, 1);
       state.order.splice(target, 0, trackId);
+      renderControls();
       renderDetail();
     }
     function wireControlDrag(row) {
-      row.addEventListener('dragstart', e => {
+      const summary = row.querySelector('.track-card-summary');
+      summary.draggable = true;
+      summary.addEventListener('dragstart', e => {
         row.classList.add('dragging');
         e.dataTransfer.setData('text/plain', row.dataset.trackId);
       });
-      row.addEventListener('dragend', () => row.classList.remove('dragging'));
+      summary.addEventListener('dragend', () => row.classList.remove('dragging'));
       row.addEventListener('dragover', e => e.preventDefault());
       row.addEventListener('drop', e => {
         e.preventDefault();
@@ -1597,13 +1647,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       }).filter(row => row.trackId === 'ref' || row.candidate);
       if (!rows.length) { root.innerHTML = `<div class="detail-empty">${t('noTracks')}</div>`; return; }
 
-      const width = 1040;
-      const labelWidth = 250;
-      const plotLeft = 285;
-      const plotWidth = 690;
-      const rowStep = 78;
-      const top = 44;
-      const height = top + rows.length * rowStep + 34;
+      const width = 1200;
+      const plotLeft = 170;
+      const plotWidth = 980;
+      const rowStep = 72;
+      const top = 52;
+      const height = top + rows.length * rowStep + 36;
       const rowY = row => top + rows.indexOf(row) * rowStep;
       const refRow = rows.find(r => r.trackId === 'ref');
       const fragments = [];
@@ -1615,12 +1664,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const subtitle = row.trackId === 'ref'
           ? `${t('reference')} · ${row.range.start}-${row.range.end}`
           : `${row.candidate.candidate_id} · ${row.candidate.query_chr}:${row.range.start}-${row.range.end}`;
-        fragments.push(`<rect class="detail-track-bg" x="0" y="${y - 30}" width="${width}" height="${rowStep - 8}" rx="8"></rect>`);
-        fragments.push(`<text class="detail-label" x="18" y="${y - 5}">${esc(row.track.name || row.trackId)}</text>`);
-        fragments.push(`<text class="detail-subtext" x="18" y="${y + 14}">${esc(subtitle)}</text>`);
+        fragments.push(`<text class="detail-label" x="${plotLeft - 14}" y="${y + 4}" text-anchor="end">${esc(row.track.name || row.trackId)}</text>`);
+        fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 27}">${esc(subtitle)}</text>`);
         fragments.push(`<line class="detail-axis" x1="${plotLeft}" y1="${y}" x2="${plotLeft + plotWidth}" y2="${y}"></line>`);
-        fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 24}">${Number(row.range.start).toLocaleString()}</text>`);
-        fragments.push(`<text class="detail-subtext" x="${plotLeft + plotWidth}" y="${y + 24}" text-anchor="end">${Number(row.range.end).toLocaleString()}</text>`);
+        fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 16}">${Number(row.range.start).toLocaleString()}</text>`);
+        fragments.push(`<text class="detail-subtext" x="${plotLeft + plotWidth}" y="${y + 16}" text-anchor="end">${Number(row.range.end).toLocaleString()}</text>`);
 
         if (row.trackId === 'ref') {
           const input = reportData.input || {};
@@ -1629,13 +1677,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           const geneEnd = Number(info.gene_rel_end || input.sequence_length || row.range.end);
           const x1 = xFor(geneStart, row.range, plotLeft, plotWidth);
           const x2 = xFor(geneEnd, row.range, plotLeft, plotWidth);
-          fragments.push(`<rect class="detail-ref-gene" x="${Math.min(x1, x2)}" y="${y - 7}" width="${Math.max(3, Math.abs(x2 - x1))}" height="14" rx="7"></rect>`);
+          fragments.push(`<rect class="detail-ref-gene" x="${Math.min(x1, x2)}" y="${y - 8}" width="${Math.max(3, Math.abs(x2 - x1))}" height="16" rx="3"></rect>`);
         } else {
           for (const block of row.candidate.blocks || []) {
             const [qs, qe] = normRange(block.query_start, block.query_end);
             const x1 = xFor(qs, row.range, plotLeft, plotWidth);
             const x2 = xFor(qe, row.range, plotLeft, plotWidth);
-            fragments.push(`<rect class="detail-match" x="${Math.min(x1, x2)}" y="${y - 6}" width="${Math.max(3, Math.abs(x2 - x1))}" height="12" rx="6"></rect>`);
+            fragments.push(`<rect class="detail-match" x="${Math.min(x1, x2)}" y="${y - 8}" width="${Math.max(3, Math.abs(x2 - x1))}" height="16" rx="3"></rect>`);
             if (refRow) {
               const refY = rowY(refRow);
               const rx1 = xFor(block.ref_start, refRow.range, plotLeft, plotWidth);
@@ -1643,7 +1691,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
               const qx1 = xFor(block.query_start, row.range, plotLeft, plotWidth);
               const qx2 = xFor(block.query_end, row.range, plotLeft, plotWidth);
               const reverse = (Number(block.ref_start) - Number(block.ref_end)) * (Number(block.query_start) - Number(block.query_end)) < 0;
-              ribbons.push(`<polygon class="detail-block${reverse ? ' reverse' : ''}" points="${rx1},${refY + 9} ${rx2},${refY + 9} ${qx2},${y - 9} ${qx1},${y - 9}"></polygon>`);
+              ribbons.push(`<polygon class="detail-block${reverse ? ' reverse' : ''}" points="${rx1},${refY + 10} ${rx2},${refY + 10} ${qx2},${y - 10} ${qx1},${y - 10}"></polygon>`);
             }
           }
         }
@@ -1663,16 +1711,16 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           const rPos = Number(variant.ref_source_pos);
           if (Number.isFinite(qPos) && qPos >= row.range.start && qPos <= row.range.end) {
             const x = xFor(qPos, row.range, plotLeft, plotWidth);
-            markers.push(`<circle class="detail-variant ${vClass}" cx="${x}" cy="${y - 15}" r="4"><title>${esc(variant.type)} ${esc(row.track.name)}:${qPos}</title></circle>`);
+            markers.push(`<rect class="detail-variant ${vClass}" x="${x - 2}" y="${y - 24}" width="4" height="18"><title>${esc(variant.type)} ${esc(row.track.name)}:${qPos}</title></rect>`);
           }
           if (Number.isFinite(rPos) && rPos >= refRow.range.start && rPos <= refRow.range.end) {
             const x = xFor(rPos, refRow.range, plotLeft, plotWidth);
-            markers.push(`<circle class="detail-variant ${vClass}" cx="${x}" cy="${refY - 15}" r="4"><title>${esc(variant.type)} ref:${rPos}</title></circle>`);
+            markers.push(`<rect class="detail-variant ${vClass}" x="${x - 2}" y="${refY - 24}" width="4" height="18"><title>${esc(variant.type)} ref:${rPos}</title></rect>`);
           }
         }
       }
 
-      root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg></div>`;
+      root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg></div>`;
     }
     function renderOutputs() {
       const rows = [`<tr><th>${t('filename')}</th><th>${t('description')}</th><th>${t('path')}</th></tr>`];
