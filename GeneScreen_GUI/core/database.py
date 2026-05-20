@@ -130,9 +130,17 @@ class Database:
                     FOREIGN KEY (qry_genome_id) REFERENCES genomes(id)
                 );
 
+                -- 用户手动删除但保留文件的历史报告，避免刷新时重新同步回来
+                CREATE TABLE IF NOT EXISTS deleted_history_reports (
+                    report_path TEXT PRIMARY KEY,
+                    deleted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+
                 -- 索引
                 CREATE INDEX IF NOT EXISTS idx_genomes_name ON genomes(name);
                 CREATE INDEX IF NOT EXISTS idx_history_created ON analysis_history(created_at);
+                CREATE INDEX IF NOT EXISTS idx_history_output_dir ON analysis_history(output_dir);
+                CREATE INDEX IF NOT EXISTS idx_history_report_path ON analysis_history(report_path);
                 CREATE INDEX IF NOT EXISTS idx_annotations_genome ON genome_annotations(genome_id);
             ''')
             self._ensure_genome_columns(conn)
@@ -419,6 +427,11 @@ class Database:
                 identity, output_dir, report_path, status
             ))
             history_id = cursor.lastrowid
+            if report_path:
+                conn.execute(
+                    'DELETE FROM deleted_history_reports WHERE report_path = ?',
+                    (report_path,)
+                )
         self._notify_history_changed()
         return history_id
 
@@ -436,6 +449,12 @@ class Database:
                 values
             )
             updated = cursor.rowcount > 0
+            report_path = kwargs.get("report_path")
+            if updated and report_path:
+                conn.execute(
+                    'DELETE FROM deleted_history_reports WHERE report_path = ?',
+                    (report_path,)
+                )
         if updated:
             self._notify_history_changed()
         return updated
@@ -474,6 +493,12 @@ class Database:
             ''')
             return [row["report_path"] for row in cursor.fetchall() if row["report_path"]]
 
+    def get_deleted_history_report_paths(self) -> List[str]:
+        """获取用户手动删除后需要跳过自动同步的报告路径"""
+        with self.connection() as conn:
+            cursor = conn.execute('SELECT report_path FROM deleted_history_reports')
+            return [row["report_path"] for row in cursor.fetchall() if row["report_path"]]
+
     def get_history_by_id(self, history_id: int) -> Optional[Dict[str, Any]]:
         """根据 ID 获取历史记录"""
         with self.connection() as conn:
@@ -490,13 +515,85 @@ class Database:
             row = cursor.fetchone()
             return dict(row) if row else None
 
-    def delete_history(self, history_id: int) -> bool:
+    def count_history_with_output_dir(self, output_dir: str, exclude_ids: Optional[List[int]] = None) -> int:
+        """统计仍引用指定输出目录的历史记录数"""
+        if not output_dir:
+            return 0
+        exclude_ids = exclude_ids or []
+        with self.connection() as conn:
+            if exclude_ids:
+                placeholders = ','.join('?' for _ in exclude_ids)
+                cursor = conn.execute(
+                    f'''
+                    SELECT COUNT(*) AS count
+                    FROM analysis_history
+                    WHERE output_dir = ? AND id NOT IN ({placeholders})
+                    ''',
+                    [output_dir] + exclude_ids
+                )
+            else:
+                cursor = conn.execute(
+                    '''
+                    SELECT COUNT(*) AS count
+                    FROM analysis_history
+                    WHERE output_dir = ?
+                    ''',
+                    (output_dir,)
+                )
+            row = cursor.fetchone()
+            return int(row["count"] if row else 0)
+
+    def count_history_with_report_path(self, report_path: str, exclude_ids: Optional[List[int]] = None) -> int:
+        """统计仍引用指定报告文件的历史记录数"""
+        if not report_path:
+            return 0
+        exclude_ids = exclude_ids or []
+        with self.connection() as conn:
+            if exclude_ids:
+                placeholders = ','.join('?' for _ in exclude_ids)
+                cursor = conn.execute(
+                    f'''
+                    SELECT COUNT(*) AS count
+                    FROM analysis_history
+                    WHERE report_path = ? AND id NOT IN ({placeholders})
+                    ''',
+                    [report_path] + exclude_ids
+                )
+            else:
+                cursor = conn.execute(
+                    '''
+                    SELECT COUNT(*) AS count
+                    FROM analysis_history
+                    WHERE report_path = ?
+                    ''',
+                    (report_path,)
+                )
+            row = cursor.fetchone()
+            return int(row["count"] if row else 0)
+
+    def delete_history(self, history_id: int, suppress_report: bool = False) -> bool:
         """删除历史记录"""
         with self.connection() as conn:
+            report_path = None
+            if suppress_report:
+                report_cursor = conn.execute(
+                    'SELECT report_path FROM analysis_history WHERE id = ?',
+                    (history_id,)
+                )
+                row = report_cursor.fetchone()
+                report_path = row["report_path"] if row else None
             cursor = conn.execute(
                 'DELETE FROM analysis_history WHERE id = ?', (history_id,)
             )
             deleted = cursor.rowcount > 0
+            if deleted and suppress_report and report_path:
+                conn.execute(
+                    '''
+                    INSERT OR REPLACE INTO deleted_history_reports (report_path, deleted_at)
+                    VALUES (?, CURRENT_TIMESTAMP)
+                    ''',
+                    (report_path,)
+                )
         if deleted:
             self._notify_history_changed()
         return deleted

@@ -373,12 +373,22 @@ class HistoryPage(QWidget):
 
         if dialog.exec() == QDialog.Accepted:
             delete_files = delete_files_checkbox.isChecked()
+            deleting_ids = {
+                int(record.get("id"))
+                for record in checked_records
+                if record.get("id") is not None
+            }
+            deleted_paths = set()
             for record in checked_records:
                 history_id = record.get("id")
+                files_deleted = False
                 if delete_files:
-                    self._delete_output_dir(record)
+                    files_deleted = self._delete_output_artifacts(record, deleting_ids, deleted_paths)
                 if history_id:
-                    self._db.delete_history(history_id)
+                    self._db.delete_history(
+                        history_id,
+                        suppress_report=not delete_files or not files_deleted
+                    )
             self._load_history()
     
     def _open_result(self, row: int, column: int):
@@ -421,18 +431,48 @@ class HistoryPage(QWidget):
                     records.append(record)
         return records
 
-    def _delete_output_dir(self, record: dict) -> None:
+    @staticmethod
+    def _canonical_path(path: str) -> str:
+        return os.path.normcase(os.path.normpath(path))
+
+    def _delete_output_artifacts(self, record: dict, deleting_ids: set, deleted_paths: set) -> bool:
+        """删除当前历史项对应文件；共享路径仍被其他历史项引用时保留。"""
         output_dir = record.get("output_dir", "") or ""
-        if not output_dir:
-            return
-        path = Path(output_dir)
+        report_path = record.get("report_path", "") or ""
+        files_deleted = False
+        history_id = record.get("id")
+        exclude_ids = sorted(deleting_ids)
+
         try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            elif path.exists():
-                path.unlink()
+            if output_dir:
+                normalized_output = self._canonical_path(output_dir)
+                path = Path(output_dir)
+                shared_output = self._db.count_history_with_output_dir(
+                    output_dir,
+                    exclude_ids=exclude_ids
+                ) > 0
+                if normalized_output not in deleted_paths and path.exists() and not shared_output:
+                    if path.is_dir():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                    deleted_paths.add(normalized_output)
+                    return True
+
+            if report_path:
+                normalized_report = self._canonical_path(report_path)
+                path = Path(report_path)
+                shared_report = self._db.count_history_with_report_path(
+                    report_path,
+                    exclude_ids=[int(history_id)] if history_id is not None else []
+                ) > 0
+                if normalized_report not in deleted_paths and path.exists() and not shared_report:
+                    path.unlink()
+                    deleted_paths.add(normalized_report)
+                    files_deleted = True
         except Exception:
-            pass
+            return False
+        return files_deleted
 
     def _sync_history_from_output_dir(self) -> None:
         output_root = Path(get_output_dir())
@@ -441,6 +481,10 @@ class HistoryPage(QWidget):
         existing_reports = set(
             os.path.normcase(os.path.normpath(p))
             for p in self._db.get_history_report_paths()
+        )
+        deleted_reports = set(
+            os.path.normcase(os.path.normpath(p))
+            for p in self._db.get_deleted_history_report_paths()
         )
         mode_map = {
             "Gene_ID": "gene_id",
@@ -462,7 +506,7 @@ class HistoryPage(QWidget):
                     report_files.extend(run_dir.glob("*.report.html"))
                 for report_file in report_files:
                     report_path = os.path.normcase(os.path.normpath(str(report_file)))
-                    if report_path in existing_reports:
+                    if report_path in existing_reports or report_path in deleted_reports:
                         continue
                     if report_file.name == "index.html" and report_file.parent.name == "report":
                         input_value = run_dir.name
