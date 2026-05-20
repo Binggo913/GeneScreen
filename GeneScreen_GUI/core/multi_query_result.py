@@ -895,13 +895,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-size: 14px;
       min-width: 0;
     }
-    .report-title {
-      font-size: 13px;
-      opacity: 0.9;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
     .gen-time { margin-top: 8px; font-size: 13px; opacity: 0.85; }
     .lang-switch {
       display: flex;
@@ -958,16 +951,37 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       border-bottom: 2px solid #667eea;
     }
     .section h3 { font-size: 14px; color: #666; margin: 15px 0 10px; }
-    .info-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
-    .info-table td { padding: 10px 15px; border-bottom: 1px solid #eee; vertical-align: top; }
-    .info-table .label { width: 150px; font-weight: 600; color: #666; background: #f9f9f9; }
-    .info-table .value { color: #333; }
-    .info-table code {
+    .info-table-grid { width: 100%; border-collapse: collapse; margin-bottom: 15px; }
+    .info-table-grid td { padding: 10px 15px; border-bottom: 1px solid #eee; vertical-align: top; }
+    .info-table-grid .label {
+      width: 120px;
+      font-weight: 600;
+      color: #666;
+      background: #f9f9f9;
+    }
+    .info-table-grid .value { color: #333; width: 30%; }
+    .info-table-grid code {
       background: #f0f0f0;
       padding: 2px 6px;
       border-radius: 3px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       word-break: break-all;
+    }
+    .value-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .value-chip {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #eef1ff;
+      color: #4f5fc9;
+      border-radius: 999px;
+      font-size: 12px;
+      line-height: 1.6;
+      max-width: 100%;
+      overflow-wrap: anywhere;
     }
     .stats-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; text-align: center; }
     .stats-table th {
@@ -1182,7 +1196,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       .header { padding: 24px 20px; }
       .header-content { gap: 12px; }
       .subtitle { gap: 10px; }
-      .report-title { max-width: 42vw; }
       .section { padding: 20px 16px; }
       .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
       .overview-track { grid-template-columns: 120px minmax(420px, 1fr); }
@@ -1198,7 +1211,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         <h1 data-zh="GeneScreen 比对分析报告" data-en="GeneScreen Alignment Analysis Report">GeneScreen 比对分析报告</h1>
         <div class="subtitle">
           <span class="mode-badge" id="modeBadge">GeneScreen</span>
-          <span class="report-title" data-zh="输入：__TITLE__" data-en="Input: __TITLE__">输入：__TITLE__</span>
           <a class="json-badge" href="data.json" data-zh="data.json" data-en="data.json">data.json</a>
         </div>
         <div class="gen-time" id="generatedAt"></div>
@@ -1214,7 +1226,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
 
   <div class="section input-section">
     <h2 data-zh="初始化" data-en="Initialization">初始化</h2>
-    <table class="info-table" id="initTable"></table>
+    <table class="info-table-grid" id="initTable"></table>
   </div>
 
   <div class="section">
@@ -1270,15 +1282,16 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     const state = { selected: {}, order: [] };
     let currentLang = 'zh';
     const i18n = {
-      inputId: { zh: '输入 ID', en: 'Input ID' },
+      geneId: { zh: '基因ID', en: 'Gene ID' },
       mode: { zh: '模式', en: 'Mode' },
+      referenceGenome: { zh: '参考基因组', en: 'Reference Genome' },
       sequenceLength: { zh: '序列长度', en: 'Sequence Length' },
       identityThreshold: { zh: 'Identity 阈值', en: 'Identity Threshold' },
       minAlignmentLength: { zh: '最小比对长度', en: 'Minimum Alignment Length' },
       pairwiseTopN: { zh: 'Pairwise Top-N', en: 'Pairwise Top-N' },
       allCandidates: { zh: '全量候选', en: 'All Candidates' },
-      queryUpstream: { zh: '查询上游延伸', en: 'Query Upstream Extension' },
-      queryDownstream: { zh: '查询下游延伸', en: 'Query Downstream Extension' },
+      upstream: { zh: '上游延伸', en: 'Upstream Extension' },
+      downstream: { zh: '下游延伸', en: 'Downstream Extension' },
       type: { zh: '类型', en: 'Type' },
       name: { zh: '名称', en: 'Name' },
       fasta: { zh: 'FASTA', en: 'FASTA' },
@@ -1421,17 +1434,36 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function renderInit() {
       const input = reportData.input || {};
       const params = reportData.parameters || {};
+      const ref = (reportData.genomes && reportData.genomes.ref) || {};
+      const queries = (reportData.genomes && reportData.genomes.queries) || [];
+      const queryNames = queries.map(q => q.name || q.genome_id).filter(Boolean);
+      const queryValue = queryNames.length
+        ? `<div class="value-list">${queryNames.map(name => `<span class="value-chip">${esc(name)}</span>`).join('')}</div>`
+        : '-';
+      const extraction = input.extraction_info || {};
+      const upstream = Number(params.query_upstream || extraction.upstream || 0);
+      const downstream = Number(params.query_downstream || extraction.downstream || 0);
       const rows = [
-        [t('inputId'), `<code>${esc(input.id || '-')}</code>`],
-        [t('mode'), esc(modeText(reportData.mode))],
-        [t('sequenceLength'), input.sequence_length ? `${Number(input.sequence_length).toLocaleString()} bp` : '-'],
+        [t('referenceGenome'), esc(ref.name || '-')],
+        [t('queryGenomes'), queryValue],
+        [t('geneId'), `<code>${esc(input.id || '-')}</code>`],
         [t('identityThreshold'), params.identity != null ? `${params.identity}%` : '-'],
         [t('minAlignmentLength'), params.min_aln_len != null ? `${params.min_aln_len} bp` : '-'],
-        [t('pairwiseTopN'), params.pairwise_all ? t('allCandidates') : (params.candidate_limit ?? '-')],
-        [t('queryUpstream'), `${params.query_upstream || 0} bp`],
-        [t('queryDownstream'), `${params.query_downstream || 0} bp`]
+        [t('pairwiseTopN'), params.pairwise_all ? t('allCandidates') : (params.candidate_limit ?? '-')]
       ];
-      document.getElementById('initTable').innerHTML = rows.map(([k, v]) => `<tr><td class="label">${k}</td><td class="value">${v}</td></tr>`).join('');
+      if (upstream > 0) rows.push([t('upstream'), `${upstream} bp`]);
+      if (downstream > 0) rows.push([t('downstream'), `${downstream} bp`]);
+      const htmlRows = [];
+      for (let i = 0; i < rows.length; i += 2) {
+        const left = rows[i];
+        const right = rows[i + 1];
+        htmlRows.push(
+          `<tr><td class="label">${left[0]}</td><td class="value">${left[1]}</td>` +
+          (right ? `<td class="label">${right[0]}</td><td class="value">${right[1]}</td>` : '<td class="label"></td><td class="value"></td>') +
+          '</tr>'
+        );
+      }
+      document.getElementById('initTable').innerHTML = htmlRows.join('');
     }
     function renderGenomes() {
       const ref = (reportData.genomes && reportData.genomes.ref) || {};
