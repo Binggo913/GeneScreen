@@ -413,6 +413,33 @@ def _candidate_region(candidate: Dict[str, Any]) -> Tuple[int, int]:
     return max(1, left), max(max(1, left) + 1, right)
 
 
+def _candidate_fasta_region(fasta_file: Optional[str]) -> Optional[Tuple[str, int, int]]:
+    if not fasta_file or not os.path.exists(fasta_file):
+        return None
+    try:
+        with open(fasta_file, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                if not line.startswith(">"):
+                    continue
+                match = re.search(r"\bregion=([^:\s]+):([0-9]+)-([0-9]+)", line)
+                if not match:
+                    return None
+                return match.group(1), int(match.group(2)), int(match.group(3))
+    except OSError:
+        return None
+    return None
+
+
+def _local_to_region(region: Optional[Tuple[str, int, int]], value: Any) -> int:
+    try:
+        pos = int(value)
+    except (TypeError, ValueError):
+        return 1
+    if not region:
+        return max(1, pos)
+    return max(1, int(region[1]) + pos - 1)
+
+
 def _parse_location_text(location: Optional[str]) -> Optional[Tuple[str, int, int]]:
     if not location:
         return None
@@ -510,7 +537,7 @@ def _run_linkview_for_report(
             label_angle=0,
             chro_axis=True,
             chro_axis_density=2,
-            show_pos_with_label=True,
+            show_pos_with_label=False,
             bezier=True,
             style="simple",
             svg2png="",
@@ -537,25 +564,35 @@ def _run_linkview_for_report(
 
 def _legacy_legend_svg(svg_width: int, y_top: int) -> str:
     items = [
-        ("SNP", "orange", "line"),
-        ("Indel", "blue", "line"),
-        ("5' UTR", "#6B5B7B", "rect"),
-        ("3' UTR", "#B6AEC9", "rect"),
-        ("CDS", "#7A7A7A", "rect"),
+        ("SNP", "orange", "line", "snp"),
+        ("Indel", "blue", "line", "indel"),
+        ("5' UTR", "#6B5B7B", "rect", "utr5"),
+        ("3' UTR", "#B6AEC9", "rect", "utr3"),
+        ("CDS", "#7A7A7A", "rect", "cds"),
     ]
-    x = max(20, svg_width - 160)
+    item_height = 20
+    padding_x = 10
+    padding_y = 8
+    box_width = 120
+    box_height = padding_y * 2 + len(items) * item_height
+    x = max(20, svg_width - box_width - 30)
     y = y_top
     parts = [
-        f'<g class="genescreen-legend" transform="translate({x},{y})">',
-        '<rect x="0" y="0" width="135" height="112" rx="4" fill="white" stroke="#ddd"/>',
+        '<g class="genescreen-legend">',
+        f'<rect x="{x}" y="{y}" width="{box_width}" height="{box_height}" fill="white" stroke="#ddd" stroke-width="1" rx="4" opacity="0.95"/>',
     ]
-    for index, (label, color, kind) in enumerate(items):
-        yy = 18 + index * 20
+    for index, (label, color, kind, data_type) in enumerate(items):
+        yy = y + padding_y + 10 + index * item_height
+        icon_x = x + padding_x
+        parts.append(
+            f'<g class="legend-item" data-type="{data_type}" style="cursor: pointer;">'
+            f'<rect x="{x + 2}" y="{yy - 9}" width="{box_width - 4}" height="{item_height - 2}" fill="transparent" class="legend-hitarea"/>'
+        )
         if kind == "line":
-            parts.append(f'<rect x="16" y="{yy-7}" width="3" height="16" fill="{color}"/>')
+            parts.append(f'<line class="legend-icon" x1="{icon_x + 6}" y1="{yy - 6}" x2="{icon_x + 6}" y2="{yy + 6}" stroke="{color}" stroke-width="3"/>')
         else:
-            parts.append(f'<rect x="12" y="{yy-6}" width="16" height="12" rx="2" fill="{color}"/>')
-        parts.append(f'<text x="40" y="{yy+4}" font-size="12" fill="#333">{label}</text>')
+            parts.append(f'<rect class="legend-icon" x="{icon_x}" y="{yy - 5}" width="12" height="10" rx="2" fill="{color}"/>')
+        parts.append(f'<text x="{icon_x + 20}" y="{yy + 4}" font-family="Arial, sans-serif" font-size="10" fill="#666" class="legend-text">{label}</text></g>')
     parts.append("</g>")
     return "".join(parts)
 
@@ -583,6 +620,97 @@ def _process_linkview_svg_file(svg_path: str) -> None:
             handle.write(svg)
     except Exception as exc:
         print(f"[WARNING] 处理 LINKVIEW SVG 失败: {exc}")
+
+
+def _write_linkview_relation(
+    handle,
+    first_start: int,
+    first_end: int,
+    second_start: int,
+    second_end: int,
+    first_len: int,
+    second_len: int,
+    identity: float,
+    first_alias: str,
+    second_alias: str,
+) -> None:
+    first_aln_len = max(1, abs(int(first_end) - int(first_start)) + 1)
+    second_aln_len = max(1, abs(int(second_end) - int(second_start)) + 1)
+    cov_first = first_aln_len / max(1, int(first_len or first_aln_len)) * 100
+    cov_second = second_aln_len / max(1, int(second_len or second_aln_len)) * 100
+    handle.write(
+        f"{int(first_start):>8} {int(first_end):>8}  | {int(second_start):>8} {int(second_end):>8}  | "
+        f"{first_aln_len:>8} {second_aln_len:>8}  | {float(identity):>8.2f}  | "
+        f"{int(first_len or first_aln_len):>8} {int(second_len or second_aln_len):>8}  | "
+        f"{cov_first:>8.2f} {cov_second:>8.2f}  | {first_alias}\t{second_alias}\n"
+    )
+
+
+def _write_hl_marker(handle, alias: str, pos: int, color: str) -> None:
+    pos = max(1, int(pos))
+    handle.write(f"{alias}\t{pos - 1}\t{pos}\t{color}\n")
+
+
+def _pairwise_lookup(result: Dict[str, Any]) -> Dict[Tuple[str, str, str, str], List[Dict[str, Any]]]:
+    lookup: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
+    for pairwise_result in result.get("pairwise_results") or []:
+        left_id = sanitize_path_segment(pairwise_result.get("left_query") or "left", "left")
+        right_id = sanitize_path_segment(pairwise_result.get("right_query") or "right", "right")
+        left_candidate_id = str(pairwise_result.get("left_candidate_id") or "")
+        right_candidate_id = str(pairwise_result.get("right_candidate_id") or "")
+        lookup.setdefault((left_id, left_candidate_id, right_id, right_candidate_id), []).append(pairwise_result)
+    return lookup
+
+
+def _pairwise_for_selection(
+    lookup: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]],
+    first_id: str,
+    first_candidate_id: str,
+    second_id: str,
+    second_candidate_id: str,
+) -> Tuple[Optional[Dict[str, Any]], bool]:
+    direct = lookup.get((first_id, first_candidate_id, second_id, second_candidate_id))
+    if direct:
+        return direct[0], False
+    reverse = lookup.get((second_id, second_candidate_id, first_id, first_candidate_id))
+    if reverse:
+        return reverse[0], True
+    return None, False
+
+
+def _read_pairwise_blocks(
+    pairwise_result: Dict[str, Any],
+    left_region: Optional[Tuple[str, int, int]],
+    right_region: Optional[Tuple[str, int, int]],
+) -> List[Dict[str, Any]]:
+    coords_file = pairwise_result.get("coords")
+    if not coords_file or not os.path.exists(coords_file):
+        return []
+    blocks = []
+    with open(coords_file, "r", encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line or line.startswith("[") or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 7:
+                continue
+            try:
+                right_start = _local_to_region(right_region, parts[0])
+                right_end = _local_to_region(right_region, parts[1])
+                left_start = _local_to_region(left_region, parts[2])
+                left_end = _local_to_region(left_region, parts[3])
+                identity = float(parts[6])
+            except ValueError:
+                continue
+            blocks.append({
+                "left_start": left_start,
+                "left_end": left_end,
+                "right_start": right_start,
+                "right_end": right_end,
+                "identity": identity,
+            })
+    return blocks
 
 
 def _generate_linkview_detail_assets(
@@ -636,11 +764,13 @@ def _generate_linkview_detail_assets(
     for qid in query_order:
         entry = query_entry_by_id.get(qid) or {}
         query_lengths[qid] = _read_fai_lengths(entry.get("fasta") or entry.get("source_fasta"))
+    pairwise_lookup = _pairwise_lookup(result)
 
     default_order = ["ref"] + query_order
     all_orders = list(permutations(default_order))
     candidate_lists = [candidates_map[qid] for qid in query_order]
     svg_map: Dict[str, Dict[str, str]] = {}
+    range_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
     views = []
 
     for combo in product(*candidate_lists):
@@ -648,6 +778,17 @@ def _generate_linkview_detail_assets(
         selected_candidates = {qid: candidate for qid, candidate in zip(query_order, combo)}
         combo_key = _selection_key(query_order, selected)
         svg_map.setdefault(combo_key, {})
+        range_map[combo_key] = {
+            "ref": {"start": 1, "end": max(1, ref_length), "label": ref_alias}
+        }
+        for qid, candidate in selected_candidates.items():
+            q_left, q_right = _candidate_region(candidate)
+            range_map[combo_key][qid] = {
+                "start": q_left,
+                "end": q_right,
+                "chrom": candidate.get("query_chr"),
+                "label": track_aliases.get(qid, qid),
+            }
 
         for order_tuple in all_orders:
             order = list(order_tuple)
@@ -664,25 +805,72 @@ def _generate_linkview_detail_assets(
                 handle.write("NUCMER\n\n")
                 handle.write("    [S1]     [E1]  |     [S2]     [E2]  |  [LEN 1]  [LEN 2]  |  [% IDY]  |  [LEN R]  [LEN Q]  |  [COV R]  [COV Q]  | [TAGS]\n")
                 handle.write("=" * 120 + "\n")
-                for qid in query_order:
-                    candidate = selected_candidates[qid]
-                    q_chr = candidate.get("query_chr") or "query"
-                    q_len = _lookup_length(query_lengths.get(qid, {}), q_chr, _candidate_region(candidate)[1])
-                    for block in candidate.get("blocks") or []:
-                        q_start = int(block.get("query_start") or 1)
-                        q_end = int(block.get("query_end") or q_start)
-                        r_start = int(block.get("ref_start") or 1)
-                        r_end = int(block.get("ref_end") or r_start)
-                        q_aln_len = int(block.get("query_aln_len") or abs(q_end - q_start) + 1)
-                        r_aln_len = int(block.get("ref_aln_len") or abs(r_end - r_start) + 1)
-                        block_identity = float(block.get("identity") or identity)
-                        cov_q = q_aln_len / max(1, q_len) * 100
-                        cov_r = r_aln_len / max(1, ref_length) * 100
-                        handle.write(
-                            f"{q_start:>8} {q_end:>8}  | {r_start:>8} {r_end:>8}  | "
-                            f"{q_aln_len:>8} {r_aln_len:>8}  | {block_identity:>8.2f}  | "
-                            f"{q_len:>8} {ref_length:>8}  | {cov_q:>8.2f} {cov_r:>8.2f}  | "
-                            f"{track_aliases[qid]}\t{ref_alias}\n"
+                for first_id, second_id in zip(order, order[1:]):
+                    if first_id == "ref" or second_id == "ref":
+                        qid = second_id if first_id == "ref" else first_id
+                        candidate = selected_candidates.get(qid)
+                        if not candidate:
+                            continue
+                        q_chr = candidate.get("query_chr") or "query"
+                        q_len = _lookup_length(query_lengths.get(qid, {}), q_chr, _candidate_region(candidate)[1])
+                        for block in candidate.get("blocks") or []:
+                            q_start = int(block.get("query_start") or 1)
+                            q_end = int(block.get("query_end") or q_start)
+                            r_start = int(block.get("ref_start") or 1)
+                            r_end = int(block.get("ref_end") or r_start)
+                            block_identity = float(block.get("identity") or identity)
+                            if first_id == "ref":
+                                _write_linkview_relation(
+                                    handle, r_start, r_end, q_start, q_end,
+                                    ref_length, q_len, block_identity, ref_alias, track_aliases[qid]
+                                )
+                            else:
+                                _write_linkview_relation(
+                                    handle, q_start, q_end, r_start, r_end,
+                                    q_len, ref_length, block_identity, track_aliases[qid], ref_alias
+                                )
+                        continue
+
+                    first_candidate = selected_candidates.get(first_id)
+                    second_candidate = selected_candidates.get(second_id)
+                    if not first_candidate or not second_candidate:
+                        continue
+                    pairwise_result, reversed_pair = _pairwise_for_selection(
+                        pairwise_lookup,
+                        first_id,
+                        str(first_candidate.get("candidate_id") or ""),
+                        second_id,
+                        str(second_candidate.get("candidate_id") or ""),
+                    )
+                    if not pairwise_result:
+                        continue
+                    if reversed_pair:
+                        left_id, right_id = second_id, first_id
+                        left_candidate, right_candidate = second_candidate, first_candidate
+                    else:
+                        left_id, right_id = first_id, second_id
+                        left_candidate, right_candidate = first_candidate, second_candidate
+                    left_region = _candidate_fasta_region(pairwise_result.get("left_candidate_fasta")) or (
+                        left_candidate.get("query_chr"), *_candidate_region(left_candidate)
+                    )
+                    right_region = _candidate_fasta_region(pairwise_result.get("right_candidate_fasta")) or (
+                        right_candidate.get("query_chr"), *_candidate_region(right_candidate)
+                    )
+                    first_range = _candidate_region(first_candidate)
+                    second_range = _candidate_region(second_candidate)
+                    first_len = max(1, first_range[1] - first_range[0] + 1)
+                    second_len = max(1, second_range[1] - second_range[0] + 1)
+                    for block in _read_pairwise_blocks(pairwise_result, left_region, right_region):
+                        coords_by_track = {
+                            left_id: (block["left_start"], block["left_end"]),
+                            right_id: (block["right_start"], block["right_end"]),
+                        }
+                        first_start, first_end = coords_by_track[first_id]
+                        second_start, second_end = coords_by_track[second_id]
+                        _write_linkview_relation(
+                            handle, first_start, first_end, second_start, second_end,
+                            first_len, second_len, block.get("identity") or identity,
+                            track_aliases[first_id], track_aliases[second_id]
                         )
 
             with open(k_file, "w", encoding="utf-8") as handle:
@@ -694,31 +882,78 @@ def _generate_linkview_detail_assets(
                         handle.write(f"{track_aliases[track_id]}:{left}:{right}\n")
 
             with open(hl_file, "w", encoding="utf-8") as handle:
-                for qid in query_order:
-                    candidate = selected_candidates[qid]
-                    q_left, q_right = _candidate_region(candidate)
-                    pair_id = f"ref__{qid}"
-                    for variant in variants_payload:
-                        if variant.get("pair_id") != pair_id:
+                for first_id, second_id in zip(order, order[1:]):
+                    if first_id == "ref" or second_id == "ref":
+                        qid = second_id if first_id == "ref" else first_id
+                        candidate = selected_candidates.get(qid)
+                        if not candidate:
                             continue
-                        if variant.get("query_chr") and not _chrom_matches(variant.get("query_chr"), candidate.get("query_chr")):
-                            continue
+                        q_left, q_right = _candidate_region(candidate)
+                        pair_id = f"ref__{qid}"
+                        for variant in variants_payload:
+                            if variant.get("pair_id") != pair_id:
+                                continue
+                            if variant.get("query_chr") and not _chrom_matches(variant.get("query_chr"), candidate.get("query_chr")):
+                                continue
+                            color = "orange" if str(variant.get("type", "")).upper() == "SNP" else "blue"
+                            try:
+                                q_pos = int(variant.get("query_genome_pos"))
+                                r_pos = int(variant.get("ref_source_pos"))
+                            except (TypeError, ValueError):
+                                continue
+                            var_type = str(variant.get("type", "")).upper()
+                            if var_type == "SNP":
+                                if 1 <= r_pos <= ref_length:
+                                    _write_hl_marker(handle, ref_alias, r_pos, color)
+                                if q_left <= q_pos <= q_right:
+                                    _write_hl_marker(handle, track_aliases[qid], q_pos, color)
+                            elif var_type == "INS" and q_left <= q_pos <= q_right:
+                                _write_hl_marker(handle, track_aliases[qid], q_pos, color)
+                            elif var_type == "DEL" and 1 <= r_pos <= ref_length:
+                                _write_hl_marker(handle, ref_alias, r_pos, color)
+                        continue
+
+                    first_candidate = selected_candidates.get(first_id)
+                    second_candidate = selected_candidates.get(second_id)
+                    if not first_candidate or not second_candidate:
+                        continue
+                    pairwise_result, reversed_pair = _pairwise_for_selection(
+                        pairwise_lookup,
+                        first_id,
+                        str(first_candidate.get("candidate_id") or ""),
+                        second_id,
+                        str(second_candidate.get("candidate_id") or ""),
+                    )
+                    if not pairwise_result:
+                        continue
+                    if reversed_pair:
+                        left_id, right_id = second_id, first_id
+                        left_candidate, right_candidate = second_candidate, first_candidate
+                    else:
+                        left_id, right_id = first_id, second_id
+                        left_candidate, right_candidate = first_candidate, second_candidate
+                    left_region = _candidate_fasta_region(pairwise_result.get("left_candidate_fasta")) or (
+                        left_candidate.get("query_chr"), *_candidate_region(left_candidate)
+                    )
+                    right_region = _candidate_fasta_region(pairwise_result.get("right_candidate_fasta")) or (
+                        right_candidate.get("query_chr"), *_candidate_region(right_candidate)
+                    )
+                    left_range = _candidate_region(left_candidate)
+                    right_range = _candidate_region(right_candidate)
+                    for variant in parse_variants(pairwise_result.get("snps")):
                         color = "orange" if str(variant.get("type", "")).upper() == "SNP" else "blue"
-                        try:
-                            q_pos = int(variant.get("query_genome_pos"))
-                            r_pos = int(variant.get("ref_source_pos"))
-                        except (TypeError, ValueError):
-                            continue
+                        left_pos = _local_to_region(left_region, variant.get("ref_source_pos"))
+                        right_pos = _local_to_region(right_region, variant.get("query_genome_pos"))
                         var_type = str(variant.get("type", "")).upper()
                         if var_type == "SNP":
-                            if 1 <= r_pos <= ref_length:
-                                handle.write(f"{ref_alias}\t{r_pos - 1}\t{r_pos}\t{color}\n")
-                            if q_left <= q_pos <= q_right:
-                                handle.write(f"{track_aliases[qid]}\t{q_pos - 1}\t{q_pos}\t{color}\n")
-                        elif var_type == "INS" and q_left <= q_pos <= q_right:
-                            handle.write(f"{track_aliases[qid]}\t{q_pos - 1}\t{q_pos}\t{color}\n")
-                        elif var_type == "DEL" and 1 <= r_pos <= ref_length:
-                            handle.write(f"{ref_alias}\t{r_pos - 1}\t{r_pos}\t{color}\n")
+                            if left_range[0] <= left_pos <= left_range[1]:
+                                _write_hl_marker(handle, track_aliases[left_id], left_pos, color)
+                            if right_range[0] <= right_pos <= right_range[1]:
+                                _write_hl_marker(handle, track_aliases[right_id], right_pos, color)
+                        elif var_type == "INS" and right_range[0] <= right_pos <= right_range[1]:
+                            _write_hl_marker(handle, track_aliases[right_id], right_pos, color)
+                        elif var_type == "DEL" and left_range[0] <= left_pos <= left_range[1]:
+                            _write_hl_marker(handle, track_aliases[left_id], left_pos, color)
 
             with open(gff_file, "w", encoding="utf-8") as handle:
                 if ref_gff_source:
@@ -766,6 +1001,7 @@ def _generate_linkview_detail_assets(
         "linkview_svg_map": svg_map,
         "linkview_views": views,
         "linkview_track_aliases": track_aliases,
+        "linkview_track_ranges": range_map,
         "linkview_default_order_key": _order_key(default_order),
         "linkview_layout": {
             "svg_width": 1200,
@@ -1665,7 +1901,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       inset: 8px 0;
       pointer-events: none;
     }
-    .detail-linkview-img {
+    .detail-linkview-img,
+    .detail-linkview-svg svg {
       display: block;
       width: 100%;
       height: auto;
@@ -1687,8 +1924,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       pointer-events: auto;
     }
     .detail-track-control.dragging { opacity: .55; }
+    .detail-track-control.ref-control {
+      background: transparent;
+      cursor: grab;
+      padding-left: 0;
+    }
     .detail-track-name {
-      max-width: 118px;
+      max-width: 92px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1698,9 +1940,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       color: #333;
     }
     .detail-track-select {
-      width: 72px;
+      width: 58px;
       height: 22px;
-      padding: 0 18px 0 6px;
+      padding: 0 16px 0 5px;
       border: 1px solid #d6d9e6;
       border-radius: 4px;
       background: #fff;
@@ -1708,6 +1950,107 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-size: 11px;
       cursor: pointer;
     }
+    .detail-track-end-label {
+      font-family: Arial, sans-serif;
+      font-size: 10px;
+      fill: #555;
+      pointer-events: none;
+    }
+    .svg-tooltip {
+      position: absolute;
+      background: rgba(0, 0, 0, 0.85);
+      color: white;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 12px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s;
+      z-index: 1000;
+      max-width: 300px;
+      white-space: nowrap;
+    }
+    .svg-tooltip.visible { opacity: 1; }
+    .svg-tooltip .tooltip-title {
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #ffd700;
+    }
+    .svg-tooltip .tooltip-row { margin: 2px 0; }
+    .tooltip-label { color: #aaa; }
+    .tooltip-seq {
+      font-family: monospace;
+      background: rgba(255,255,255,0.1);
+      padding: 1px 4px;
+      border-radius: 2px;
+    }
+    .legend-item { transition: opacity 0.2s; }
+    .legend-item:hover { opacity: 0.8; }
+    .legend-item.disabled { opacity: 0.4; }
+    .legend-item.disabled .legend-text { text-decoration: line-through; }
+    .zoom-btn {
+      position: absolute;
+      right: 10px;
+      bottom: 10px;
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 6px;
+      background: rgba(102, 126, 234, 0.9);
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 100;
+    }
+    .zoom-btn:hover {
+      background: rgba(102, 126, 234, 1);
+      transform: scale(1.1);
+    }
+    .zoom-modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.8);
+      z-index: 10000;
+      overflow: auto;
+    }
+    .zoom-modal.visible {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .zoom-modal-content {
+      position: relative;
+      background: white;
+      border-radius: 8px;
+      width: 95%;
+      max-width: 1400px;
+      max-height: 90vh;
+      overflow: auto;
+      padding: 20px;
+    }
+    .zoom-modal-close {
+      position: absolute;
+      top: 10px;
+      right: 15px;
+      font-size: 28px;
+      font-weight: bold;
+      color: #666;
+      background: none;
+      border: none;
+      cursor: pointer;
+      z-index: 10;
+    }
+    .zoom-modal-close:hover { color: #333; }
+    .zoom-modal-body {
+      width: 100%;
+      overflow-x: auto;
+      position: relative;
+    }
+    .zoom-modal-body svg { min-width: 1200px; }
     .detail-label { font-family: Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #333; }
     .detail-subtext { font-family: Arial, sans-serif; font-size: 11px; fill: #777; }
     .detail-chro { fill: none; stroke: #000; stroke-width: 1.5; }
@@ -1807,6 +2150,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     </div>
   </div>
 
+  <div id="zoom-modal" class="zoom-modal">
+    <div class="zoom-modal-content">
+      <button class="zoom-modal-close" id="zoom-modal-close">&times;</button>
+      <div class="zoom-modal-body" id="zoom-modal-body"></div>
+    </div>
+  </div>
+
   <div class="section output-section">
     <h2 data-zh="结果文件" data-en="Output Files">结果文件</h2>
     <table class="file-table" id="outputTable"></table>
@@ -1820,6 +2170,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => { reportData = data; init(); }).catch(init);
 
     const state = { selected: {}, order: [] };
+    let detailRenderToken = 0;
     let currentLang = 'zh';
     const i18n = {
       geneId: { zh: '基因ID', en: 'Gene ID' },
@@ -1854,6 +2205,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       filename: { zh: '文件名', en: 'File Name' },
       description: { zh: '描述', en: 'Description' },
       path: { zh: '路径', en: 'Path' },
+      position: { zh: '位置', en: 'Position' },
       structuredData: { zh: '新版报告结构化数据', en: 'Structured data for the new report' },
       generatedAt: { zh: '生成时间', en: 'Generated' },
       geneIdMode: { zh: 'Gene ID 模式', en: 'Gene ID Mode' },
@@ -2190,6 +2542,161 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const firstKey = Object.keys(selectedViews)[0];
       return firstKey ? selectedViews[firstKey] : null;
     }
+    function currentTrackRanges(order) {
+      const detail = reportData.detail || {};
+      const ranges = (detail.linkview_track_ranges || {})[detailSelectionKey()] || {};
+      return order.map(trackId => {
+        const fallback = trackId === 'ref' ? { start: 1, end: refLength() } : candidateBounds(candidateById(trackId, state.selected[trackId]));
+        return { trackId, range: ranges[trackId] || fallback || { start: 1, end: 1 } };
+      });
+    }
+    function makeTrackControls(order, svgHeight, topMargin) {
+      const displayHeight = Math.max(1, svgHeight + topMargin);
+      return order.map((trackId, index) => {
+        const track = trackById(trackId);
+        const y = (svgHeight / (order.length + 1)) * (index + 1);
+        const topPct = (((y + topMargin) / displayHeight) * 100).toFixed(3);
+        const trackTitle = esc(track.name || trackId);
+        if (trackId === 'ref') {
+          return `<div class="detail-track-control ref-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:100px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`;
+        }
+        const options = (reportData.candidates[trackId] || [])
+          .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
+          .join('');
+        return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:154px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
+      }).join('');
+    }
+    function showSvgTooltip(content, event, tooltip) {
+      tooltip.innerHTML = content;
+      tooltip.classList.add('visible');
+      updateSvgTooltip(event, tooltip);
+    }
+    function updateSvgTooltip(event, tooltip) {
+      const container = tooltip.parentElement;
+      const rect = container.getBoundingClientRect();
+      let x = event.clientX - rect.left + 15;
+      let y = event.clientY - rect.top - 10;
+      if (x + 220 > rect.width) x = event.clientX - rect.left - 220;
+      tooltip.style.left = `${Math.max(5, x)}px`;
+      tooltip.style.top = `${Math.max(5, y)}px`;
+    }
+    function hideSvgTooltip(tooltip) {
+      tooltip.classList.remove('visible');
+    }
+    function markerRects(svg, type) {
+      const color = type === 'snp' ? 'orange' : 'blue';
+      return Array.from(svg.querySelectorAll(`rect[fill="${color}"]`));
+    }
+    function centerOfRect(rect) {
+      return {
+        x: Number(rect.getAttribute('x') || 0) + Number(rect.getAttribute('width') || 0) / 2,
+        y: Number(rect.getAttribute('y') || 0) + Number(rect.getAttribute('height') || 0) / 2,
+      };
+    }
+    function removeHoverLines(svg) {
+      svg.querySelectorAll('.variant-hover-line').forEach(line => line.remove());
+    }
+    function drawHoverLines(svg, rect, type) {
+      removeHoverLines(svg);
+      const point = centerOfRect(rect);
+      const candidates = markerRects(svg, type).filter(other => other !== rect);
+      const related = candidates
+        .map(other => ({ rect: other, point: centerOfRect(other) }))
+        .filter(item => Math.abs(item.point.x - point.x) <= 8 && Math.abs(item.point.y - point.y) > 4);
+      const targets = related.length ? related : candidates
+        .map(other => ({ rect: other, point: centerOfRect(other), dist: Math.abs(centerOfRect(other).x - point.x) + Math.abs(centerOfRect(other).y - point.y) }))
+        .sort((a, b) => a.dist - b.dist)
+        .slice(0, 1);
+      targets.forEach(item => {
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', point.x);
+        line.setAttribute('y1', point.y);
+        line.setAttribute('x2', item.point.x);
+        line.setAttribute('y2', item.point.y);
+        line.setAttribute('stroke', '#e53935');
+        line.setAttribute('stroke-width', '2');
+        line.setAttribute('stroke-dasharray', '4,2');
+        line.setAttribute('pointer-events', 'none');
+        line.classList.add('variant-hover-line');
+        svg.appendChild(line);
+      });
+    }
+    function enhanceLinkviewSvg(svg, order, tooltip) {
+      if (!svg) return;
+      svg.classList.add('detail-linkview-svg-root');
+      svg.setAttribute('width', '100%');
+      svg.style.overflow = 'visible';
+      const ranges = currentTrackRanges(order);
+      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      chros.forEach((rect, index) => {
+        const row = ranges[index];
+        if (!row) return;
+        const x = Number(rect.getAttribute('x') || 0);
+        const y = Number(rect.getAttribute('y') || 0);
+        const width = Number(rect.getAttribute('width') || 0);
+        const height = Number(rect.getAttribute('height') || 0);
+        const labelY = y + height + 15;
+        [['start', x + 2, 'start'], ['end', x + width - 2, 'end']].forEach(([kind, labelX, anchor]) => {
+          const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          text.setAttribute('x', labelX);
+          text.setAttribute('y', labelY);
+          text.setAttribute('text-anchor', anchor);
+          text.setAttribute('class', 'detail-track-end-label');
+          text.textContent = Number(row.range[kind] || 0).toLocaleString();
+          svg.appendChild(text);
+        });
+      });
+      svg.querySelectorAll('.legend-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const type = item.getAttribute('data-type');
+          item.classList.toggle('disabled');
+          const visible = !item.classList.contains('disabled');
+          let elements = [];
+          if (type === 'snp') elements = markerRects(svg, 'snp');
+          if (type === 'indel') elements = markerRects(svg, 'indel');
+          if (type === 'utr5') elements = Array.from(svg.querySelectorAll('.UTR5'));
+          if (type === 'utr3') elements = Array.from(svg.querySelectorAll('.UTR3'));
+          if (type === 'cds') elements = Array.from(svg.querySelectorAll('.exon'));
+          elements.forEach(el => { el.style.display = visible ? '' : 'none'; });
+        });
+      });
+      [['snp', 'SNP'], ['indel', 'Indel']].forEach(([type, label]) => {
+        markerRects(svg, type).forEach(rect => {
+          rect.style.cursor = 'pointer';
+          rect.addEventListener('mouseenter', event => {
+            drawHoverLines(svg, rect, type);
+            const point = centerOfRect(rect);
+            showSvgTooltip(`<div class="tooltip-title">${label}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${Math.round(point.x)}, ${Math.round(point.y)}</div>`, event, tooltip);
+          });
+          rect.addEventListener('mousemove', event => updateSvgTooltip(event, tooltip));
+          rect.addEventListener('mouseleave', () => {
+            hideSvgTooltip(tooltip);
+            removeHoverLines(svg);
+          });
+        });
+      });
+    }
+    function openZoomModal() {
+      const modal = document.getElementById('zoom-modal');
+      const body = document.getElementById('zoom-modal-body');
+      const svg = document.querySelector('#detail .detail-linkview-svg svg');
+      if (!modal || !body || !svg) return;
+      const clone = svg.cloneNode(true);
+      clone.id = 'modal-svg';
+      clone.style.width = '100%';
+      clone.style.minWidth = '1200px';
+      body.innerHTML = '<div id="modal-tooltip" class="svg-tooltip"></div>';
+      body.appendChild(clone);
+      modal.classList.add('visible');
+      document.body.style.overflow = 'hidden';
+      enhanceLinkviewSvg(clone, state.order.length ? state.order.slice() : ['ref'].concat(queryIds()), document.getElementById('modal-tooltip'));
+    }
+    function closeZoomModal() {
+      const modal = document.getElementById('zoom-modal');
+      if (!modal) return;
+      modal.classList.remove('visible');
+      document.body.style.overflow = '';
+    }
     function renderLinkviewDetail() {
       const root = document.getElementById('detail');
       const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
@@ -2202,24 +2709,28 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
       const svgHeight = Number(layout.svg_height || 400);
       const topMargin = Number(layout.top_margin || 0);
-      const displayHeight = Math.max(1, svgHeight + topMargin);
-      const controls = [];
-      order.forEach((trackId, index) => {
-        const track = trackById(trackId);
-        const y = (svgHeight / (order.length + 1)) * (index + 1);
-        const topPct = (((y + topMargin) / displayHeight) * 100).toFixed(3);
-        const trackTitle = esc(track.name || trackId);
-        if (trackId === 'ref') {
-          controls.push(`<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:150px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`);
-          return;
-        }
-        const options = (reportData.candidates[trackId] || [])
-          .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
-          .join('');
-        controls.push(`<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:150px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`);
-      });
-      root.innerHTML = `<div class="detail-canvas"><img class="detail-linkview-img" src="${esc(svgPath)}" alt="LINKVIEW local alignment"><div class="detail-track-overlays">${controls.join('')}</div></div>`;
+      const token = ++detailRenderToken;
+      root.innerHTML = `<div class="detail-canvas"><div id="svg-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg">Loading...</div><div class="detail-track-overlays">${makeTrackControls(order, svgHeight, topMargin)}</div><button id="zoom-btn" class="zoom-btn" title="Zoom"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path><path d="M11 8v6M8 11h6"></path></svg></button></div>`;
       wireDetailTrackControls();
+      const zoomBtn = document.getElementById('zoom-btn');
+      if (zoomBtn) zoomBtn.onclick = openZoomModal;
+      const modal = document.getElementById('zoom-modal');
+      const closeBtn = document.getElementById('zoom-modal-close');
+      if (closeBtn) closeBtn.onclick = closeZoomModal;
+      if (modal) modal.onclick = event => { if (event.target === modal) closeZoomModal(); };
+      fetch(svgPath)
+        .then(response => response.ok ? response.text() : Promise.reject(new Error('SVG fetch failed')))
+        .then(svgText => {
+          if (token !== detailRenderToken) return;
+          const host = root.querySelector('.detail-linkview-svg');
+          host.innerHTML = svgText;
+          enhanceLinkviewSvg(host.querySelector('svg'), order, root.querySelector('#svg-tooltip'));
+        })
+        .catch(() => {
+          if (token !== detailRenderToken) return;
+          const host = root.querySelector('.detail-linkview-svg');
+          host.innerHTML = `<img class="detail-linkview-img" src="${esc(svgPath)}" alt="LINKVIEW local alignment">`;
+        });
     }
     function renderVectorDetail() {
       const root = document.getElementById('detail');
