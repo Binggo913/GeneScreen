@@ -651,6 +651,33 @@ def _write_hl_marker(handle, alias: str, pos: int, color: str) -> None:
     handle.write(f"{alias}\t{pos - 1}\t{pos}\t{color}\n")
 
 
+def _append_marker(
+    markers: List[Dict[str, Any]],
+    track_id: str,
+    alias: str,
+    pos: int,
+    color: str,
+    variant: Dict[str, Any],
+    pair_id: str,
+    marker_role: str,
+) -> None:
+    var_type = str(variant.get("type", "")).upper()
+    markers.append({
+        "track_id": track_id,
+        "alias": alias,
+        "position": max(1, int(pos)),
+        "color": color,
+        "type": var_type,
+        "pair_id": pair_id,
+        "variant_id": variant.get("variant_id") or f"{pair_id}:{var_type}:{pos}:{marker_role}",
+        "marker_role": marker_role,
+        "ref": variant.get("ref"),
+        "alt": variant.get("alt"),
+        "ref_source_pos": variant.get("ref_source_pos"),
+        "query_genome_pos": variant.get("query_genome_pos"),
+    })
+
+
 def _pairwise_lookup(result: Dict[str, Any]) -> Dict[Tuple[str, str, str, str], List[Dict[str, Any]]]:
     lookup: Dict[Tuple[str, str, str, str], List[Dict[str, Any]]] = {}
     for pairwise_result in result.get("pairwise_results") or []:
@@ -771,6 +798,7 @@ def _generate_linkview_detail_assets(
     candidate_lists = [candidates_map[qid] for qid in query_order]
     svg_map: Dict[str, Dict[str, str]] = {}
     inline_svg_map: Dict[str, Dict[str, str]] = {}
+    marker_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     range_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
     views = []
 
@@ -780,6 +808,7 @@ def _generate_linkview_detail_assets(
         combo_key = _selection_key(query_order, selected)
         svg_map.setdefault(combo_key, {})
         inline_svg_map.setdefault(combo_key, {})
+        marker_map.setdefault(combo_key, {})
         range_map[combo_key] = {
             "ref": {"start": 1, "end": max(1, ref_length), "label": ref_alias}
         }
@@ -884,6 +913,7 @@ def _generate_linkview_detail_assets(
                         handle.write(f"{track_aliases[track_id]}:{left}:{right}\n")
 
             with open(hl_file, "w", encoding="utf-8") as handle:
+                marker_entries: List[Dict[str, Any]] = []
                 for first_id, second_id in zip(order, order[1:]):
                     if first_id == "ref" or second_id == "ref":
                         qid = second_id if first_id == "ref" else first_id
@@ -907,12 +937,16 @@ def _generate_linkview_detail_assets(
                             if var_type == "SNP":
                                 if 1 <= r_pos <= ref_length:
                                     _write_hl_marker(handle, ref_alias, r_pos, color)
+                                    _append_marker(marker_entries, "ref", ref_alias, r_pos, color, variant, pair_id, "ref")
                                 if q_left <= q_pos <= q_right:
                                     _write_hl_marker(handle, track_aliases[qid], q_pos, color)
+                                    _append_marker(marker_entries, qid, track_aliases[qid], q_pos, color, variant, pair_id, "query")
                             elif var_type == "INS" and q_left <= q_pos <= q_right:
                                 _write_hl_marker(handle, track_aliases[qid], q_pos, color)
+                                _append_marker(marker_entries, qid, track_aliases[qid], q_pos, color, variant, pair_id, "query")
                             elif var_type == "DEL" and 1 <= r_pos <= ref_length:
                                 _write_hl_marker(handle, ref_alias, r_pos, color)
+                                _append_marker(marker_entries, "ref", ref_alias, r_pos, color, variant, pair_id, "ref")
                         continue
 
                     first_candidate = selected_candidates.get(first_id)
@@ -942,7 +976,9 @@ def _generate_linkview_detail_assets(
                     )
                     left_range = _candidate_region(left_candidate)
                     right_range = _candidate_region(right_candidate)
-                    for variant in parse_variants(pairwise_result.get("snps")):
+                    pairwise_pair_id = f"{pairwise_result.get('pair_id') or f'{left_id}__{right_id}'}::{pairwise_result.get('left_candidate_id')}__{pairwise_result.get('right_candidate_id')}"
+                    for variant_index, variant in enumerate(parse_variants(pairwise_result.get("snps")), start=1):
+                        variant["variant_id"] = f"{pairwise_pair_id}:var_{variant_index}"
                         color = "orange" if str(variant.get("type", "")).upper() == "SNP" else "blue"
                         left_pos = _local_to_region(left_region, variant.get("ref_source_pos"))
                         right_pos = _local_to_region(right_region, variant.get("query_genome_pos"))
@@ -950,12 +986,17 @@ def _generate_linkview_detail_assets(
                         if var_type == "SNP":
                             if left_range[0] <= left_pos <= left_range[1]:
                                 _write_hl_marker(handle, track_aliases[left_id], left_pos, color)
+                                _append_marker(marker_entries, left_id, track_aliases[left_id], left_pos, color, variant, pairwise_pair_id, "left")
                             if right_range[0] <= right_pos <= right_range[1]:
                                 _write_hl_marker(handle, track_aliases[right_id], right_pos, color)
+                                _append_marker(marker_entries, right_id, track_aliases[right_id], right_pos, color, variant, pairwise_pair_id, "right")
                         elif var_type == "INS" and right_range[0] <= right_pos <= right_range[1]:
                             _write_hl_marker(handle, track_aliases[right_id], right_pos, color)
+                            _append_marker(marker_entries, right_id, track_aliases[right_id], right_pos, color, variant, pairwise_pair_id, "right")
                         elif var_type == "DEL" and left_range[0] <= left_pos <= left_range[1]:
                             _write_hl_marker(handle, track_aliases[left_id], left_pos, color)
+                            _append_marker(marker_entries, left_id, track_aliases[left_id], left_pos, color, variant, pairwise_pair_id, "left")
+                marker_map[combo_key][order_key] = marker_entries
 
             with open(gff_file, "w", encoding="utf-8") as handle:
                 if ref_gff_source:
@@ -1007,6 +1048,7 @@ def _generate_linkview_detail_assets(
     return {
         "linkview_svg_map": svg_map,
         "linkview_svg_inline_map": inline_svg_map,
+        "linkview_marker_map": marker_map,
         "linkview_views": views,
         "linkview_track_aliases": track_aliases,
         "linkview_track_ranges": range_map,
@@ -2219,6 +2261,20 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       description: { zh: '描述', en: 'Description' },
       path: { zh: '路径', en: 'Path' },
       position: { zh: '位置', en: 'Position' },
+      mutation: { zh: '变异', en: 'Mutation' },
+      refBase: { zh: '参考', en: 'Ref' },
+      qryBase: { zh: '查询', en: 'Qry' },
+      insertSeq: { zh: '插入序列', en: 'Inserted Seq' },
+      deleteSeq: { zh: '缺失序列', en: 'Deleted Seq' },
+      length: { zh: '长度', en: 'Length' },
+      insertion: { zh: '插入 (INS)', en: 'Insertion (INS)' },
+      deletion: { zh: '缺失 (DEL)', en: 'Deletion (DEL)' },
+      utr3: { zh: "3' UTR", en: "3' UTR" },
+      utr3Desc: { zh: '三端非翻译区', en: "3' Untranslated Region" },
+      utr5: { zh: "5' UTR", en: "5' UTR" },
+      utr5Desc: { zh: '五端非翻译区', en: "5' Untranslated Region" },
+      cds: { zh: 'CDS', en: 'CDS' },
+      cdsDesc: { zh: '编码序列', en: 'Coding Sequence' },
       structuredData: { zh: '新版报告结构化数据', en: 'Structured data for the new report' },
       generatedAt: { zh: '生成时间', en: 'Generated' },
       geneIdMode: { zh: 'Gene ID 模式', en: 'Gene ID Mode' },
@@ -2567,6 +2623,18 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const firstKey = Object.keys(selectedViews)[0];
       return firstKey ? selectedViews[firstKey] : null;
     }
+    function resolveLinkviewMarkers(order) {
+      const detail = reportData.detail || {};
+      const markerViews = detail.linkview_marker_map || {};
+      const selectedMarkers = markerViews[detailSelectionKey()];
+      if (!selectedMarkers) return [];
+      const exact = selectedMarkers[detailOrderKey(order)];
+      if (exact) return exact;
+      const defaultKey = detail.linkview_default_order_key;
+      if (defaultKey && selectedMarkers[defaultKey]) return selectedMarkers[defaultKey];
+      const firstKey = Object.keys(selectedMarkers)[0];
+      return firstKey ? selectedMarkers[firstKey] : [];
+    }
     function currentTrackRanges(order) {
       const detail = reportData.detail || {};
       const ranges = (detail.linkview_track_ranges || {})[detailSelectionKey()] || {};
@@ -2612,6 +2680,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const color = type === 'snp' ? 'orange' : 'blue';
       return Array.from(svg.querySelectorAll(`rect[fill="${color}"]`));
     }
+    function allMarkerRects(svg) {
+      return Array.from(svg.querySelectorAll('rect[fill="orange"], rect[fill="blue"]'));
+    }
     function centerOfRect(rect) {
       return {
         x: Number(rect.getAttribute('x') || 0) + Number(rect.getAttribute('width') || 0) / 2,
@@ -2623,8 +2694,10 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function drawHoverLines(svg, rect, type) {
       removeHoverLines(svg);
+      if (type !== 'snp') return;
+      const variantId = rect.dataset.variantId;
       const point = centerOfRect(rect);
-      const candidates = markerRects(svg, type).filter(other => other !== rect);
+      const candidates = markerRects(svg, type).filter(other => other !== rect && (!variantId || other.dataset.variantId === variantId));
       const related = candidates
         .map(other => ({ rect: other, point: centerOfRect(other) }))
         .filter(item => Math.abs(item.point.x - point.x) <= 8 && Math.abs(item.point.y - point.y) > 4);
@@ -2638,13 +2711,53 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         line.setAttribute('y1', point.y);
         line.setAttribute('x2', item.point.x);
         line.setAttribute('y2', item.point.y);
-        line.setAttribute('stroke', '#e53935');
+        line.setAttribute('stroke', 'orange');
         line.setAttribute('stroke-width', '2');
         line.setAttribute('stroke-dasharray', '4,2');
         line.setAttribute('pointer-events', 'none');
         line.classList.add('variant-hover-line');
         svg.appendChild(line);
       });
+    }
+    function variantTooltip(meta) {
+      if (!meta) return '';
+      const varType = String(meta.type || '').toUpperCase();
+      if (varType === 'SNP') {
+        return `<div class="tooltip-title">SNP</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${esc(meta.query_genome_pos || meta.position || '')}</div><div class="tooltip-row"><span class="tooltip-label">${t('mutation')}:</span> (${t('refBase')})<span class="tooltip-seq">${esc(meta.ref || '')}</span> → (${t('qryBase')})<span class="tooltip-seq">${esc(meta.alt || '')}</span></div>`;
+      }
+      if (varType === 'INS') {
+        const seq = meta.alt && meta.alt !== '-' ? meta.alt : '';
+        return `<div class="tooltip-title">${t('insertion')}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${esc(meta.ref_source_pos || meta.position || '')}</div><div class="tooltip-row"><span class="tooltip-label">${t('insertSeq')}:</span> <span class="tooltip-seq">${esc(seq)}</span></div><div class="tooltip-row"><span class="tooltip-label">${t('length')}:</span> ${seq.length || 1} bp</div>`;
+      }
+      const seq = meta.ref && meta.ref !== '-' ? meta.ref : '';
+      return `<div class="tooltip-title">${t('deletion')}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${esc(meta.query_genome_pos || meta.position || '')}</div><div class="tooltip-row"><span class="tooltip-label">${t('deleteSeq')}:</span> <span class="tooltip-seq">${esc(seq)}</span></div><div class="tooltip-row"><span class="tooltip-label">${t('length')}:</span> ${seq.length || 1} bp</div>`;
+    }
+    function featureTooltip(type, rect, ranges) {
+      const bbox = rect.getBBox ? rect.getBBox() : null;
+      const width = bbox ? Math.max(1, bbox.width) : 1;
+      const chro = rect.closest('svg') ? Array.from(rect.closest('svg').querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0)) : [];
+      const trackIndex = chro.findIndex(track => {
+        const ty = Number(track.getAttribute('y') || 0);
+        const th = Number(track.getAttribute('height') || 0);
+        const ry = Number(rect.getAttribute('y') || (bbox ? bbox.y : 0));
+        return Math.abs((ty + th / 2) - (ry + th / 2)) < 24;
+      });
+      const trackRect = trackIndex >= 0 ? chro[trackIndex] : null;
+      const row = ranges[trackIndex >= 0 ? trackIndex : 0];
+      let start = row && row.range ? Number(row.range.start || 1) : 1;
+      let end = row && row.range ? Number(row.range.end || start) : start;
+      if (trackRect && bbox) {
+        const tx = Number(trackRect.getAttribute('x') || 0);
+        const tw = Number(trackRect.getAttribute('width') || 1);
+        const span = Math.max(1, end - start + 1);
+        const featureStart = Math.round(start + ((bbox.x - tx) / tw) * span);
+        const featureEnd = Math.round(start + (((bbox.x + width) - tx) / tw) * span);
+        start = Math.max(1, featureStart);
+        end = Math.max(start, featureEnd);
+      }
+      const title = type === 'utr3' ? t('utr3') : type === 'utr5' ? t('utr5') : t('cds');
+      const desc = type === 'utr3' ? t('utr3Desc') : type === 'utr5' ? t('utr5Desc') : t('cdsDesc');
+      return `<div class="tooltip-title">${title}</div><div class="tooltip-row">${desc}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${start} - ${end}</div><div class="tooltip-row"><span class="tooltip-label">${t('length')}:</span> ${Math.max(1, end - start + 1)} bp</div>`;
     }
     function enhanceLinkviewSvg(svg, order, tooltip) {
       if (!svg) return;
@@ -2673,6 +2786,21 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           svg.appendChild(text);
         });
       });
+      const markers = resolveLinkviewMarkers(order);
+      allMarkerRects(svg).forEach((rect, index) => {
+        const meta = markers[index] || {};
+        rect.dataset.variantId = meta.variant_id || '';
+        rect.dataset.variantType = String(meta.type || '').toLowerCase();
+        rect.dataset.markerIndex = String(index);
+      });
+      [['.UTR3', 'utr3'], ['.UTR5', 'utr5'], ['.exon', 'cds']].forEach(([selector, type]) => {
+        svg.querySelectorAll(selector).forEach(el => {
+          el.style.cursor = 'pointer';
+          el.addEventListener('mouseenter', event => showSvgTooltip(featureTooltip(type, el, ranges), event, tooltip));
+          el.addEventListener('mousemove', event => updateSvgTooltip(event, tooltip));
+          el.addEventListener('mouseleave', () => hideSvgTooltip(tooltip));
+        });
+      });
       svg.querySelectorAll('.legend-item').forEach(item => {
         item.addEventListener('click', () => {
           const type = item.getAttribute('data-type');
@@ -2692,8 +2820,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           rect.style.cursor = 'pointer';
           rect.addEventListener('mouseenter', event => {
             drawHoverLines(svg, rect, type);
-            const point = centerOfRect(rect);
-            showSvgTooltip(`<div class="tooltip-title">${label}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${Math.round(point.x)}, ${Math.round(point.y)}</div>`, event, tooltip);
+            const meta = markers[Number(rect.dataset.markerIndex || -1)];
+            showSvgTooltip(variantTooltip(meta) || `<div class="tooltip-title">${label}</div>`, event, tooltip);
           });
           rect.addEventListener('mousemove', event => updateSvgTooltip(event, tooltip));
           rect.addEventListener('mouseleave', () => {
