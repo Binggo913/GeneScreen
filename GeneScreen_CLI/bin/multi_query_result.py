@@ -1939,7 +1939,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       border-radius: 8px;
       background: #fff;
       overflow: visible;
-      padding: 8px 0 8px 180px;
+      padding: 8px 0;
     }
     .detail-linkview-svg {
       min-height: 220px;
@@ -1952,8 +1952,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     .detail-track-overlays {
       position: absolute;
-      inset: 8px auto 8px 0;
-      width: 176px;
+      inset: 8px 0;
       pointer-events: none;
     }
     .detail-linkview-img,
@@ -1968,7 +1967,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       position: absolute;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 5px;
       min-height: 26px;
       padding: 2px 4px;
       background: rgba(255,255,255,.94);
@@ -1984,6 +1983,16 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       cursor: grab;
       padding-left: 0;
     }
+    .detail-drag-handle {
+      width: 12px;
+      height: 18px;
+      flex: 0 0 12px;
+      opacity: .62;
+      background-image: radial-gradient(circle, #8b93a7 1.3px, transparent 1.4px);
+      background-size: 5px 5px;
+      background-position: 0 1px;
+    }
+    .detail-track-control:hover .detail-drag-handle { opacity: .95; }
     .detail-track-name {
       max-width: 88px;
       overflow: hidden;
@@ -2009,6 +2018,19 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-family: Arial, sans-serif;
       font-size: 10px;
       fill: #555;
+      pointer-events: none;
+    }
+    .detail-gene-bracket {
+      fill: none;
+      stroke: #333;
+      stroke-width: 2;
+      pointer-events: none;
+    }
+    .detail-gene-label {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      fill: #333;
+      font-weight: 500;
       pointer-events: none;
     }
     .svg-tooltip {
@@ -2104,6 +2126,10 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       width: 100%;
       overflow-x: auto;
       position: relative;
+    }
+    .zoom-modal-body .detail-canvas {
+      min-width: 1200px;
+      padding: 8px 0;
     }
     .zoom-modal-body svg { min-width: 1200px; }
     .detail-label { font-family: Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #333; }
@@ -2227,6 +2253,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     const state = { selected: {}, order: [] };
     let detailRenderToken = 0;
     let currentLang = 'zh';
+    let resizeAlignTimer = null;
     const i18n = {
       geneId: { zh: '基因ID', en: 'Gene ID' },
       mode: { zh: '模式', en: 'Mode' },
@@ -2254,6 +2281,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       indelCount: { zh: 'Indel 数量', en: 'Indel Count' },
       noCandidates: { zh: '无候选片段', en: 'No candidates' },
       candidateSwitch: { zh: '候选切换', en: 'Candidate Selection' },
+      dragTrack: { zh: '拖动轨道调整顺序', en: 'Drag track to reorder' },
       moveUp: { zh: '上移', en: 'Move up' },
       moveDown: { zh: '下移', en: 'Move down' },
       noTracks: { zh: '无可显示轨道', en: 'No tracks' },
@@ -2327,6 +2355,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       state.selected = Object.assign({}, reportData.default_selection.selected_candidates || {});
       state.order = (reportData.default_selection.track_order || []).slice();
       switchLang(currentLang);
+      window.addEventListener('resize', () => {
+        clearTimeout(resizeAlignTimer);
+        resizeAlignTimer = setTimeout(() => {
+          document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => alignTrackControls(svg, state.order.length ? state.order.slice() : ['ref'].concat(queryIds())));
+        }, 80);
+      });
     }
     function queryIds() { return (reportData.overview && reportData.overview.query_order) || []; }
     function trackById(trackId) {
@@ -2536,8 +2570,15 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderControls();
       renderDetail();
     }
-    function wireDetailTrackControls() {
-      document.querySelectorAll('.detail-track-control').forEach(row => {
+    function isZoomModalOpen() {
+      const modal = document.getElementById('zoom-modal');
+      return Boolean(modal && modal.classList.contains('visible'));
+    }
+    function syncOpenZoomModal() {
+      if (isZoomModalOpen()) renderZoomModalBody();
+    }
+    function wireDetailTrackControls(root = document) {
+      root.querySelectorAll('.detail-track-control').forEach(row => {
         row.draggable = true;
         row.addEventListener('dragstart', e => {
           if (e.target.closest('select')) {
@@ -2558,6 +2599,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           const index = state.order.indexOf(target);
           state.order.splice(index < 0 ? state.order.length : index, 0, dragged);
           renderDetail();
+          syncOpenZoomModal();
         });
         const select = row.querySelector('select');
         if (select) {
@@ -2568,6 +2610,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
             state.selected[row.dataset.trackId] = e.target.value;
             renderOverview();
             renderDetail();
+            syncOpenZoomModal();
           };
         }
       });
@@ -2650,13 +2693,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const y = (svgHeight / (order.length + 1)) * (index + 1);
         const topPct = (((y + topMargin) / displayHeight) * 100).toFixed(3);
         const trackTitle = esc(track.name || trackId);
+        const handle = `<span class="detail-drag-handle" title="${t('dragTrack')}"></span>`;
         if (trackId === 'ref') {
-          return `<div class="detail-track-control ref-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:158px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`;
+          return `<div class="detail-track-control ref-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:170px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span></div>`;
         }
         const options = (reportData.candidates[trackId] || [])
           .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
           .join('');
-        return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:158px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
+        return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:170px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
       }).join('');
     }
     function showSvgTooltip(content, event, tooltip) {
@@ -2759,6 +2803,80 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const desc = type === 'utr3' ? t('utr3Desc') : type === 'utr5' ? t('utr5Desc') : t('cdsDesc');
       return `<div class="tooltip-title">${title}</div><div class="tooltip-row">${desc}</div><div class="tooltip-row"><span class="tooltip-label">${t('position')}:</span> ${start} - ${end}</div><div class="tooltip-row"><span class="tooltip-label">${t('length')}:</span> ${Math.max(1, end - start + 1)} bp</div>`;
     }
+    function svgViewBox(svg) {
+      const vb = svg.viewBox && svg.viewBox.baseVal;
+      if (vb && vb.width && vb.height) return vb;
+      return { x: 0, y: 0, width: Number(svg.getAttribute('width') || 1200), height: Number(svg.getAttribute('height') || 400) };
+    }
+    function alignTrackControls(svg, order) {
+      const canvas = svg.closest('.detail-canvas');
+      const overlay = canvas ? canvas.querySelector('.detail-track-overlays') : null;
+      if (!canvas || !overlay) return;
+      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      if (!chros.length) return;
+      const svgRect = svg.getBoundingClientRect();
+      const overlayRect = overlay.getBoundingClientRect();
+      const viewBox = svgViewBox(svg);
+      chros.forEach((rect, index) => {
+        const trackId = order[index];
+        const control = Array.from(overlay.querySelectorAll('.detail-track-control')).find(item => item.dataset.trackId === trackId);
+        if (!control) return;
+        const x = Number(rect.getAttribute('x') || 0);
+        const y = Number(rect.getAttribute('y') || 0);
+        const height = Number(rect.getAttribute('height') || 0);
+        const controlWidth = control.getBoundingClientRect().width || 170;
+        const xPx = svgRect.left - overlayRect.left + ((x - viewBox.x) / viewBox.width) * svgRect.width;
+        const yPx = svgRect.top - overlayRect.top + (((y + height / 2) - viewBox.y) / viewBox.height) * svgRect.height;
+        const left = Math.max(10, Math.min(overlayRect.width - controlWidth - 8, xPx - controlWidth - 14));
+        control.style.left = `${left}px`;
+        control.style.top = `${Math.max(14, yPx)}px`;
+        control.style.transform = 'translateY(-50%)';
+      });
+    }
+    function addGeneBracket(svg, order, ranges) {
+      svg.querySelectorAll('.detail-gene-bracket,.detail-gene-label').forEach(el => el.remove());
+      const refIndex = order.indexOf('ref');
+      if (refIndex < 0) return;
+      const input = reportData.input || {};
+      const info = input.extraction_info || {};
+      const geneStart = Number(info.gene_rel_start || 0);
+      const geneEnd = Number(info.gene_rel_end || 0);
+      if (!geneStart || !geneEnd || !input.id) return;
+      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      const rect = chros[refIndex];
+      const row = ranges[refIndex];
+      if (!rect || !row || !row.range) return;
+      const start = Number(row.range.start || 1);
+      const end = Number(row.range.end || start);
+      const span = Math.max(1, end - start + 1);
+      const x = Number(rect.getAttribute('x') || 0);
+      const y = Number(rect.getAttribute('y') || 0);
+      const width = Number(rect.getAttribute('width') || 0);
+      const height = Number(rect.getAttribute('height') || 0);
+      const x1 = x + ((Math.max(start, geneStart) - start) / span) * width;
+      const x2 = x + ((Math.min(end, geneEnd) - start + 1) / span) * width;
+      if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x2 - x1) < 2) return;
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const bracketY = y + height + 8;
+      const bracketHeight = 15;
+      const curl = 10;
+      const mid = (left + right) / 2;
+      const d = (right - left) > curl * 4
+        ? `M ${left},${bracketY} Q ${left},${bracketY + bracketHeight} ${left + curl},${bracketY + bracketHeight} L ${mid - curl},${bracketY + bracketHeight} Q ${mid},${bracketY + bracketHeight} ${mid},${bracketY + bracketHeight + 6} Q ${mid},${bracketY + bracketHeight} ${mid + curl},${bracketY + bracketHeight} L ${right - curl},${bracketY + bracketHeight} Q ${right},${bracketY + bracketHeight} ${right},${bracketY}`
+        : `M ${left},${bracketY} Q ${mid},${bracketY + bracketHeight + 6} ${right},${bracketY}`;
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('class', 'detail-gene-bracket');
+      svg.appendChild(path);
+      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      label.setAttribute('x', mid);
+      label.setAttribute('y', bracketY + bracketHeight + 20);
+      label.setAttribute('text-anchor', 'middle');
+      label.setAttribute('class', 'detail-gene-label');
+      label.textContent = input.id;
+      svg.appendChild(label);
+    }
     function enhanceLinkviewSvg(svg, order, tooltip) {
       if (!svg) return;
       svg.classList.add('detail-linkview-svg-root');
@@ -2786,6 +2904,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           svg.appendChild(text);
         });
       });
+      addGeneBracket(svg, order, ranges);
+      requestAnimationFrame(() => alignTrackControls(svg, order));
       const markers = resolveLinkviewMarkers(order);
       allMarkerRects(svg).forEach((rect, index) => {
         const meta = markers[index] || {};
@@ -2831,20 +2951,41 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         });
       });
     }
-    function openZoomModal() {
+    function renderZoomModalBody() {
       const modal = document.getElementById('zoom-modal');
       const body = document.getElementById('zoom-modal-body');
-      const svg = document.querySelector('#detail .detail-linkview-svg svg');
-      if (!modal || !body || !svg) return;
-      const clone = svg.cloneNode(true);
-      clone.id = 'modal-svg';
-      clone.style.width = '100%';
-      clone.style.minWidth = '1200px';
-      body.innerHTML = '<div id="modal-tooltip" class="svg-tooltip"></div>';
-      body.appendChild(clone);
+      if (!modal || !body) return false;
+      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const detail = reportData.detail || {};
+      const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
+      const svgHeight = Number(layout.svg_height || 400);
+      const topMargin = Number(layout.top_margin || 0);
+      const inlineSvg = resolveLinkviewInlineSvg(order);
+      const currentSvg = document.querySelector('#detail .detail-linkview-svg svg');
+      if (!inlineSvg && !currentSvg) return false;
+      body.innerHTML = `<div class="detail-canvas zoom-detail-canvas"><div id="modal-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg"></div><div class="detail-track-overlays">${makeTrackControls(order, svgHeight, topMargin)}</div></div>`;
+      const host = body.querySelector('.detail-linkview-svg');
+      if (inlineSvg) {
+        host.innerHTML = inlineSvg;
+      } else {
+        const clone = currentSvg.cloneNode(true);
+        clone.id = 'modal-svg';
+        host.appendChild(clone);
+      }
+      const svg = host.querySelector('svg');
+      if (!svg) return false;
+      svg.style.width = '100%';
+      svg.style.minWidth = '1200px';
+      enhanceLinkviewSvg(svg, order, body.querySelector('#modal-tooltip'));
+      wireDetailTrackControls(body);
+      return true;
+    }
+    function openZoomModal() {
+      const modal = document.getElementById('zoom-modal');
+      if (!modal) return;
       modal.classList.add('visible');
       document.body.style.overflow = 'hidden';
-      enhanceLinkviewSvg(clone, state.order.length ? state.order.slice() : ['ref'].concat(queryIds()), document.getElementById('modal-tooltip'));
+      if (!renderZoomModalBody()) closeZoomModal();
     }
     function closeZoomModal() {
       const modal = document.getElementById('zoom-modal');
@@ -2926,13 +3067,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const overlayTop = ((y / height) * 100).toFixed(3);
         const overlayWidth = `calc(${((plotLeft / width) * 100).toFixed(3)}% - 16px)`;
         const trackTitle = esc(row.track.name || row.trackId);
+        const handle = `<span class="detail-drag-handle" title="${t('dragTrack')}"></span>`;
         if (row.trackId === 'ref') {
-          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`);
+          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span></div>`);
         } else {
           const options = (reportData.candidates[row.trackId] || [])
             .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[row.trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
             .join('');
-          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`);
+          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`);
         }
         fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 27}">${esc(subtitle)}</text>`);
         fragments.push(`<rect class="detail-chro" x="${plotLeft}" y="${y - 8}" width="${plotWidth}" height="16" rx="0"></rect>`);
