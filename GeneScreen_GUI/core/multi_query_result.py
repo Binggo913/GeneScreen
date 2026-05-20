@@ -1001,10 +1001,10 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       background: white;
       border: 1px solid #eee;
       border-radius: 8px;
-      overflow-x: auto;
+      overflow: visible;
     }
     .overview-canvas {
-      min-width: 920px;
+      width: 100%;
       display: block;
     }
     .overview-body { display: grid; gap: 12px; }
@@ -1012,7 +1012,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     .chr-tracks { display: grid; gap: 12px; }
     .overview-track {
       display: grid;
-      grid-template-columns: minmax(150px, 190px) minmax(520px, 1fr);
+      grid-template-columns: minmax(120px, 190px) minmax(0, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -1028,7 +1028,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     .track-area {
       position: relative;
-      min-width: 520px;
+      min-width: 0;
       height: 20px;
     }
     .track-length {
@@ -1185,8 +1185,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       .header-content { gap: 12px; }
       .subtitle { gap: 10px; }
       .section { padding: 20px 16px; }
-      .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
-      .overview-track { grid-template-columns: 150px minmax(520px, 1fr); }
+      .overview-track { grid-template-columns: minmax(104px, 150px) minmax(0, 1fr); }
       .controls { margin-bottom: 14px; }
     }
   </style>
@@ -1502,11 +1501,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           const rowLabel = `${formatChrName(chr)}_${track.name || qid}`;
           const rangeStart = 0;
           const rangeEnd = trackLength(chr, qid);
-          const trackWidth = Math.max(8, (rangeEnd / maxTrackLength) * 100);
+          const trackScale = Math.max(0.08, rangeEnd / maxTrackLength);
           const lenLabel = formatLength(rangeEnd);
           const row = document.createElement('div');
           row.className = 'overview-track';
-          row.innerHTML = `<div class="track-label" title="${esc(rowLabel)}">${esc(rowLabel)}</div><div class="track-area"><div class="lane" style="width:${trackWidth}%"></div><div class="track-length" style="left:calc(${trackWidth}% + 5px)">${lenLabel}</div></div>`;
+          row.innerHTML = `<div class="track-label" title="${esc(rowLabel)}">${esc(rowLabel)}</div><div class="track-area"><div class="lane" style="width:calc((100% - 54px) * ${trackScale})"></div><div class="track-length" style="left:calc((100% - 54px) * ${trackScale} + 5px)">${lenLabel}</div></div>`;
           const lane = row.querySelector('.lane');
           for (const candidate of candidates) {
             const bounds = candidateBounds(candidate);
