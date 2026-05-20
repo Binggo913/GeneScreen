@@ -10,6 +10,11 @@ import json
 import os
 import re
 import shutil
+import sys
+import traceback
+import types
+from hashlib import md5
+from itertools import permutations, product
 from datetime import datetime
 from html import escape
 from typing import Any, Dict, List, Optional, Tuple
@@ -40,9 +45,9 @@ def relpath(path: Optional[str], start: str) -> Optional[str]:
     if not path:
         return None
     try:
-        return os.path.relpath(path, start)
+        return os.path.relpath(path, start).replace(os.sep, "/")
     except ValueError:
-        return path
+        return str(path).replace(os.sep, "/")
 
 
 def report_candidate_limit(result: Dict[str, Any]) -> Optional[int]:
@@ -315,6 +320,461 @@ def write_pair_hl(snps_file: Optional[str], output_path: str) -> Optional[str]:
     return output_path
 
 
+VALID_GFF_TYPES = {
+    "gene", "mrna", "transcript", "exon", "cds",
+    "five_prime_utr", "three_prime_utr", "utr", "5utr", "3utr",
+}
+
+
+def _selection_key(query_order: List[str], selected: Dict[str, str]) -> str:
+    return "||".join(f"{qid}={selected.get(qid, '')}" for qid in query_order)
+
+
+def _order_key(order: List[str]) -> str:
+    return "||".join(order)
+
+
+def _chrom_key(value: Any) -> str:
+    text = str(value or "").split()[0]
+    text = re.sub(r"^(chr|Chr|CHR)", "", text)
+    return text.lstrip("0").lower() or text.lower()
+
+
+def _chrom_matches(left: Any, right: Any) -> bool:
+    return str(left or "") == str(right or "") or _chrom_key(left) == _chrom_key(right)
+
+
+def _read_fai_lengths(fasta_file: Optional[str]) -> Dict[str, int]:
+    if not fasta_file:
+        return {}
+    candidates = [fasta_file]
+    if not str(fasta_file).endswith(".fai"):
+        candidates.append(f"{fasta_file}.fai")
+    for path in candidates:
+        if not path or not os.path.exists(path):
+            continue
+        lengths: Dict[str, int] = {}
+        with open(path, "r", encoding="utf-8", errors="ignore") as handle:
+            for line in handle:
+                parts = line.strip().split("\t")
+                if len(parts) < 2:
+                    continue
+                try:
+                    lengths[parts[0]] = int(parts[1])
+                except ValueError:
+                    continue
+        if lengths:
+            return lengths
+    return {}
+
+
+def _lookup_length(lengths: Dict[str, int], name: Any, fallback: int) -> int:
+    if not lengths:
+        return max(1, int(fallback or 1))
+    text = str(name or "")
+    candidates = [text, text.split()[0] if text else text]
+    for candidate in candidates:
+        if candidate in lengths:
+            return lengths[candidate]
+    target_key = _chrom_key(text)
+    for chrom, length in lengths.items():
+        if _chrom_key(chrom) == target_key:
+            return length
+    return max(1, int(fallback or 1))
+
+
+def _candidate_region(candidate: Dict[str, Any]) -> Tuple[int, int]:
+    starts = [
+        candidate.get("query_region_start"),
+        candidate.get("query_start"),
+        candidate.get("query_match_start"),
+    ]
+    ends = [
+        candidate.get("query_region_end"),
+        candidate.get("query_end"),
+        candidate.get("query_match_end"),
+    ]
+    points = []
+    for value in starts + ends:
+        try:
+            if value is not None:
+                points.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    for block in candidate.get("blocks") or []:
+        for key in ("query_start", "query_end"):
+            try:
+                points.append(int(block.get(key)))
+            except (TypeError, ValueError):
+                continue
+    if not points:
+        return 1, 2
+    left, right = min(points), max(points)
+    return max(1, left), max(max(1, left) + 1, right)
+
+
+def _parse_location_text(location: Optional[str]) -> Optional[Tuple[str, int, int]]:
+    if not location:
+        return None
+    match = re.match(r"^([^:]+):([0-9,]+)-([0-9,]+)$", str(location).strip())
+    if not match:
+        return None
+    try:
+        return (
+            match.group(1),
+            int(match.group(2).replace(",", "")),
+            int(match.group(3).replace(",", "")),
+        )
+    except ValueError:
+        return None
+
+
+def _write_gff_records(
+    source_gff: Optional[str],
+    handle,
+    target_seqid: str,
+    source_chr: Optional[str] = None,
+    region_start: Optional[int] = None,
+    region_end: Optional[int] = None,
+    relative: bool = False,
+) -> int:
+    if not source_gff or not os.path.exists(source_gff):
+        return 0
+    written = 0
+    with open(source_gff, "r", encoding="utf-8", errors="ignore") as source:
+        for line in source:
+            if not line.strip() or line.startswith("#"):
+                continue
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) < 9:
+                continue
+            feat_type = parts[2].lower()
+            if feat_type not in VALID_GFF_TYPES:
+                continue
+            try:
+                feat_start = int(parts[3])
+                feat_end = int(parts[4])
+            except ValueError:
+                continue
+            if source_chr and not _chrom_matches(parts[0], source_chr):
+                continue
+            if region_start is not None and region_end is not None:
+                if feat_end < region_start or feat_start > region_end:
+                    continue
+                if relative:
+                    parts[3] = str(max(1, feat_start - region_start + 1))
+                    parts[4] = str(max(1, feat_end - region_start + 1))
+            parts[0] = target_seqid
+            handle.write("\t".join(parts) + "\n")
+            written += 1
+    return written
+
+
+def _run_linkview_for_report(
+    input_file: str,
+    output_prefix: str,
+    k_file: str,
+    hl_file: Optional[str],
+    gff_file: Optional[str],
+    min_identity: float,
+    min_aln_len: int,
+) -> bool:
+    try:
+        import argparse
+        try:
+            from . import LINKVIEW
+        except ImportError:
+            module_dir = os.path.dirname(os.path.abspath(__file__))
+            if module_dir not in sys.path:
+                sys.path.insert(0, module_dir)
+            if "cairosvg" not in sys.modules:
+                cairosvg_stub = types.ModuleType("cairosvg")
+                cairosvg_stub.svg2png = lambda *args, **kwargs: None
+                sys.modules["cairosvg"] = cairosvg_stub
+            import LINKVIEW
+
+        args = argparse.Namespace(
+            input=input_file,
+            type=2,
+            output=output_prefix,
+            karyotype=k_file,
+            highlight=hl_file if hl_file and os.path.exists(hl_file) else None,
+            gff=gff_file if gff_file and os.path.exists(gff_file) else None,
+            min_identity=min_identity,
+            min_alignment_length=min_aln_len,
+            svg_height=400,
+            svg_width=1200,
+            svg_space=0.2,
+            chro_thickness=15,
+            label_font_size=18,
+            label_angle=0,
+            chro_axis=True,
+            chro_axis_density=2,
+            show_pos_with_label=True,
+            bezier=True,
+            style="simple",
+            svg2png="",
+            svg2png_dpi=350,
+            no_label=False,
+            no_dash=False,
+            no_scale=False,
+            hl_min1px=False,
+            scale=None,
+            gap_length=0.2,
+            chro_len=None,
+            parameter=None,
+            max_evalue=1e-5,
+            min_bit_score=5000,
+        )
+        LINKVIEW.args = args
+        LINKVIEW.main(args)
+        return os.path.exists(f"{output_prefix}.svg")
+    except Exception as exc:
+        print(f"[WARNING] 新版报告 LINKVIEW 局部图生成失败: {exc}")
+        traceback.print_exc()
+        return False
+
+
+def _legacy_legend_svg(svg_width: int, y_top: int) -> str:
+    items = [
+        ("SNP", "orange", "line"),
+        ("Indel", "blue", "line"),
+        ("5' UTR", "#6B5B7B", "rect"),
+        ("3' UTR", "#B6AEC9", "rect"),
+        ("CDS", "#7A7A7A", "rect"),
+    ]
+    x = max(20, svg_width - 160)
+    y = y_top
+    parts = [
+        f'<g class="genescreen-legend" transform="translate({x},{y})">',
+        '<rect x="0" y="0" width="135" height="112" rx="4" fill="white" stroke="#ddd"/>',
+    ]
+    for index, (label, color, kind) in enumerate(items):
+        yy = 18 + index * 20
+        if kind == "line":
+            parts.append(f'<rect x="16" y="{yy-7}" width="3" height="16" fill="{color}"/>')
+        else:
+            parts.append(f'<rect x="12" y="{yy-6}" width="16" height="12" rx="2" fill="{color}"/>')
+        parts.append(f'<text x="40" y="{yy+4}" font-size="12" fill="#333">{label}</text>')
+    parts.append("</g>")
+    return "".join(parts)
+
+
+def _process_linkview_svg_file(svg_path: str) -> None:
+    try:
+        with open(svg_path, "r", encoding="utf-8", errors="ignore") as handle:
+            svg = handle.read()
+        width_match = re.search(r'width="(\d+)"', svg)
+        height_match = re.search(r'height="(\d+)"', svg)
+        if not width_match or not height_match:
+            return
+        width = int(width_match.group(1))
+        height = int(height_match.group(1))
+        top_margin = 90
+        svg = re.sub(
+            r'<svg\s+width="[^"]*"\s+height="[^"]*"',
+            f'<svg width="{width}" height="{height + top_margin}" viewBox="0 -{top_margin} {width} {height + top_margin}" preserveAspectRatio="xMidYMid meet"',
+            svg,
+            count=1,
+        )
+        if "genescreen-legend" not in svg:
+            svg = svg.replace("</svg>", f"{_legacy_legend_svg(width, -top_margin + 35)}</svg>")
+        with open(svg_path, "w", encoding="utf-8") as handle:
+            handle.write(svg)
+    except Exception as exc:
+        print(f"[WARNING] 处理 LINKVIEW SVG 失败: {exc}")
+
+
+def _generate_linkview_detail_assets(
+    result: Dict[str, Any],
+    output_dir: str,
+    report_dir: str,
+    mode: str,
+    ref_length: int,
+    genome_files: Dict[str, Any],
+    query_order: List[str],
+    tracks: List[Dict[str, Any]],
+    candidates_map: Dict[str, List[Dict[str, Any]]],
+    variants_payload: List[Dict[str, Any]],
+    identity: float,
+    min_aln_len: int,
+) -> Dict[str, Any]:
+    if not query_order or not all(candidates_map.get(qid) for qid in query_order):
+        return {}
+
+    asset_dir = ensure_dir(os.path.join(report_dir, "linkview_detail"))
+    input_id = sanitize_path_segment(result.get("id") or "input", "input")
+    ref_alias = input_id
+    track_aliases = {"ref": ref_alias}
+    used_aliases = {ref_alias}
+    track_by_id = {track.get("track_id"): track for track in tracks}
+    for qid in query_order:
+        base = sanitize_path_segment(track_by_id.get(qid, {}).get("name") or qid, qid)
+        alias = base
+        suffix = 2
+        while alias in used_aliases:
+            alias = f"{base}_{suffix}"
+            suffix += 1
+        track_aliases[qid] = alias
+        used_aliases.add(alias)
+
+    query_entries = result.get("queries") or genome_files.get("queries") or []
+    query_entry_by_id: Dict[str, Dict[str, Any]] = {}
+    for index, qid in enumerate(query_order):
+        if index < len(query_entries):
+            query_entry_by_id[qid] = query_entries[index]
+        else:
+            query_entry_by_id[qid] = {}
+
+    ref_gff_source = result.get("gff")
+    ref_region = None
+    if not ref_gff_source and mode == "location":
+        ref_region = _parse_location_text(result.get("location"))
+        ref_gff_source = genome_files.get("ref_gff")
+
+    query_lengths: Dict[str, Dict[str, int]] = {}
+    for qid in query_order:
+        entry = query_entry_by_id.get(qid) or {}
+        query_lengths[qid] = _read_fai_lengths(entry.get("fasta") or entry.get("source_fasta"))
+
+    default_order = ["ref"] + query_order
+    all_orders = list(permutations(default_order))
+    candidate_lists = [candidates_map[qid] for qid in query_order]
+    svg_map: Dict[str, Dict[str, str]] = {}
+    views = []
+
+    for combo in product(*candidate_lists):
+        selected = {qid: candidate["candidate_id"] for qid, candidate in zip(query_order, combo)}
+        selected_candidates = {qid: candidate for qid, candidate in zip(query_order, combo)}
+        combo_key = _selection_key(query_order, selected)
+        svg_map.setdefault(combo_key, {})
+
+        for order_tuple in all_orders:
+            order = list(order_tuple)
+            order_key = _order_key(order)
+            view_hash = md5(f"{combo_key}@@{order_key}".encode("utf-8")).hexdigest()[:16]
+            prefix = os.path.join(asset_dir, f"detail_{view_hash}")
+            input_file = f"{prefix}.coords"
+            k_file = f"{prefix}.k"
+            hl_file = f"{prefix}.hl"
+            gff_file = f"{prefix}.gff3"
+
+            with open(input_file, "w", encoding="utf-8") as handle:
+                handle.write("ref.fasta query.fasta\n")
+                handle.write("NUCMER\n\n")
+                handle.write("    [S1]     [E1]  |     [S2]     [E2]  |  [LEN 1]  [LEN 2]  |  [% IDY]  |  [LEN R]  [LEN Q]  |  [COV R]  [COV Q]  | [TAGS]\n")
+                handle.write("=" * 120 + "\n")
+                for qid in query_order:
+                    candidate = selected_candidates[qid]
+                    q_chr = candidate.get("query_chr") or "query"
+                    q_len = _lookup_length(query_lengths.get(qid, {}), q_chr, _candidate_region(candidate)[1])
+                    for block in candidate.get("blocks") or []:
+                        q_start = int(block.get("query_start") or 1)
+                        q_end = int(block.get("query_end") or q_start)
+                        r_start = int(block.get("ref_start") or 1)
+                        r_end = int(block.get("ref_end") or r_start)
+                        q_aln_len = int(block.get("query_aln_len") or abs(q_end - q_start) + 1)
+                        r_aln_len = int(block.get("ref_aln_len") or abs(r_end - r_start) + 1)
+                        block_identity = float(block.get("identity") or identity)
+                        cov_q = q_aln_len / max(1, q_len) * 100
+                        cov_r = r_aln_len / max(1, ref_length) * 100
+                        handle.write(
+                            f"{q_start:>8} {q_end:>8}  | {r_start:>8} {r_end:>8}  | "
+                            f"{q_aln_len:>8} {r_aln_len:>8}  | {block_identity:>8.2f}  | "
+                            f"{q_len:>8} {ref_length:>8}  | {cov_q:>8.2f} {cov_r:>8.2f}  | "
+                            f"{track_aliases[qid]}\t{ref_alias}\n"
+                        )
+
+            with open(k_file, "w", encoding="utf-8") as handle:
+                for track_id in order:
+                    if track_id == "ref":
+                        handle.write(f"{ref_alias}:1:{max(1, ref_length)}\n")
+                    else:
+                        left, right = _candidate_region(selected_candidates[track_id])
+                        handle.write(f"{track_aliases[track_id]}:{left}:{right}\n")
+
+            with open(hl_file, "w", encoding="utf-8") as handle:
+                for qid in query_order:
+                    candidate = selected_candidates[qid]
+                    q_left, q_right = _candidate_region(candidate)
+                    pair_id = f"ref__{qid}"
+                    for variant in variants_payload:
+                        if variant.get("pair_id") != pair_id:
+                            continue
+                        if variant.get("query_chr") and not _chrom_matches(variant.get("query_chr"), candidate.get("query_chr")):
+                            continue
+                        color = "orange" if str(variant.get("type", "")).upper() == "SNP" else "blue"
+                        try:
+                            q_pos = int(variant.get("query_genome_pos"))
+                            r_pos = int(variant.get("ref_source_pos"))
+                        except (TypeError, ValueError):
+                            continue
+                        var_type = str(variant.get("type", "")).upper()
+                        if var_type == "SNP":
+                            if 1 <= r_pos <= ref_length:
+                                handle.write(f"{ref_alias}\t{r_pos - 1}\t{r_pos}\t{color}\n")
+                            if q_left <= q_pos <= q_right:
+                                handle.write(f"{track_aliases[qid]}\t{q_pos - 1}\t{q_pos}\t{color}\n")
+                        elif var_type == "INS" and q_left <= q_pos <= q_right:
+                            handle.write(f"{track_aliases[qid]}\t{q_pos - 1}\t{q_pos}\t{color}\n")
+                        elif var_type == "DEL" and 1 <= r_pos <= ref_length:
+                            handle.write(f"{ref_alias}\t{r_pos - 1}\t{r_pos}\t{color}\n")
+
+            with open(gff_file, "w", encoding="utf-8") as handle:
+                if ref_gff_source:
+                    if ref_region:
+                        _write_gff_records(
+                            ref_gff_source, handle, ref_alias,
+                            source_chr=ref_region[0],
+                            region_start=ref_region[1],
+                            region_end=ref_region[2],
+                            relative=True,
+                        )
+                    else:
+                        _write_gff_records(ref_gff_source, handle, ref_alias)
+                for qid in query_order:
+                    entry = query_entry_by_id.get(qid) or {}
+                    candidate = selected_candidates[qid]
+                    q_left, q_right = _candidate_region(candidate)
+                    _write_gff_records(
+                        entry.get("gff") or entry.get("source_gff"),
+                        handle,
+                        track_aliases[qid],
+                        source_chr=candidate.get("query_chr"),
+                        region_start=q_left,
+                        region_end=q_right,
+                        relative=False,
+                    )
+            if os.path.exists(gff_file) and os.path.getsize(gff_file) == 0:
+                os.remove(gff_file)
+
+            if _run_linkview_for_report(input_file, prefix, k_file, hl_file, gff_file, identity, min_aln_len):
+                svg_path = f"{prefix}.svg"
+                _process_linkview_svg_file(svg_path)
+                svg_map[combo_key][order_key] = relpath(svg_path, report_dir) or ""
+
+        if svg_map.get(combo_key):
+            views.append({
+                "selection_key": combo_key,
+                "selected_candidates": selected,
+                "svg_count": len(svg_map[combo_key]),
+            })
+
+    if not views:
+        return {}
+    return {
+        "linkview_svg_map": svg_map,
+        "linkview_views": views,
+        "linkview_track_aliases": track_aliases,
+        "linkview_default_order_key": _order_key(default_order),
+        "linkview_layout": {
+            "svg_width": 1200,
+            "svg_height": 400,
+            "top_margin": 90,
+        },
+    }
+
+
 def _mode_ref_query_names(mode: str, result: Dict[str, Any], ref_name: str, qry_name: Optional[str]) -> Tuple[str, str]:
     result_id = result.get("id", "input")
     if mode == "sequence":
@@ -522,6 +982,28 @@ def build_multi_query_payload(
 
     source_ref_fasta = genome_files.get("ref_fasta")
     source_ref_gff = genome_files.get("ref_gff")
+    detail_assets = _generate_linkview_detail_assets(
+        result=result,
+        output_dir=output_dir,
+        report_dir=report_dir,
+        mode=mode,
+        ref_length=ref_length,
+        genome_files=genome_files,
+        query_order=query_order,
+        tracks=tracks,
+        candidates_map=candidates_map,
+        variants_payload=variants_payload,
+        identity=identity,
+        min_aln_len=min_aln_len,
+    )
+    detail_payload = {
+        "track_order": ["ref"] + query_order,
+        "selected_candidates": selected_candidates,
+        "visible_pair_ids": [pair["pair_id"] for pair in pairs],
+        "visible_links": visible_links,
+        "variant_ids": [variant["variant_id"] for variant in variants_payload],
+    }
+    detail_payload.update(detail_assets)
     return {
         "schema_version": "multi_query_report.v1",
         "generated_at": datetime.now().isoformat(timespec="seconds"),
@@ -569,13 +1051,7 @@ def build_multi_query_payload(
                 for query_id, candidates in candidates_map.items()
             },
         },
-        "detail": {
-            "track_order": ["ref"] + query_order,
-            "selected_candidates": selected_candidates,
-            "visible_pair_ids": [pair["pair_id"] for pair in pairs],
-            "visible_links": visible_links,
-            "variant_ids": [variant["variant_id"] for variant in variants_payload],
-        },
+        "detail": detail_payload,
         "variants": variants_payload,
         "statistics": {
             "genome_count": 1 + len(query_order),
@@ -1189,6 +1665,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       inset: 8px 0;
       pointer-events: none;
     }
+    .detail-linkview-img {
+      display: block;
+      width: 100%;
+      height: auto;
+      min-height: 220px;
+      object-fit: contain;
+    }
     .detail-track-control {
       position: absolute;
       display: inline-flex;
@@ -1683,6 +2166,62 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       });
     }
     function renderDetail() {
+      if (reportData.detail && reportData.detail.linkview_svg_map) {
+        renderLinkviewDetail();
+        return;
+      }
+      renderVectorDetail();
+    }
+    function detailSelectionKey() {
+      return queryIds().map(qid => `${qid}=${state.selected[qid] || ''}`).join('||');
+    }
+    function detailOrderKey(order) {
+      return order.join('||');
+    }
+    function resolveLinkviewSvg(order) {
+      const detail = reportData.detail || {};
+      const viewMap = detail.linkview_svg_map || {};
+      const selectedViews = viewMap[detailSelectionKey()];
+      if (!selectedViews) return null;
+      const exact = selectedViews[detailOrderKey(order)];
+      if (exact) return exact;
+      const defaultKey = detail.linkview_default_order_key;
+      if (defaultKey && selectedViews[defaultKey]) return selectedViews[defaultKey];
+      const firstKey = Object.keys(selectedViews)[0];
+      return firstKey ? selectedViews[firstKey] : null;
+    }
+    function renderLinkviewDetail() {
+      const root = document.getElementById('detail');
+      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const svgPath = resolveLinkviewSvg(order);
+      if (!svgPath) {
+        renderVectorDetail();
+        return;
+      }
+      const detail = reportData.detail || {};
+      const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
+      const svgHeight = Number(layout.svg_height || 400);
+      const topMargin = Number(layout.top_margin || 0);
+      const displayHeight = Math.max(1, svgHeight + topMargin);
+      const controls = [];
+      order.forEach((trackId, index) => {
+        const track = trackById(trackId);
+        const y = (svgHeight / (order.length + 1)) * (index + 1);
+        const topPct = (((y + topMargin) / displayHeight) * 100).toFixed(3);
+        const trackTitle = esc(track.name || trackId);
+        if (trackId === 'ref') {
+          controls.push(`<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:150px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`);
+          return;
+        }
+        const options = (reportData.candidates[trackId] || [])
+          .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
+          .join('');
+        controls.push(`<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:8px; top:${topPct}%; width:150px; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`);
+      });
+      root.innerHTML = `<div class="detail-canvas"><img class="detail-linkview-img" src="${esc(svgPath)}" alt="LINKVIEW local alignment"><div class="detail-track-overlays">${controls.join('')}</div></div>`;
+      wireDetailTrackControls();
+    }
+    function renderVectorDetail() {
       const root = document.getElementById('detail');
       const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
       const rows = order.map(trackId => {
