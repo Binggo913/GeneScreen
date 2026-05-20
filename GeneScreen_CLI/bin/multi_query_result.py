@@ -1102,12 +1102,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       font-size: 13px;
       color: #666;
     }
-    .detail-layout {
-      display: grid;
-      grid-template-columns: 300px minmax(0, 1fr);
-      gap: 18px;
-      align-items: start;
-    }
+    .detail-layout { display: block; }
     .controls {
       background: #fff;
       border: 1px solid #eee;
@@ -1177,6 +1172,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     .track-card-body button:hover { background: #f3f0ff; }
     .track-stack { min-width: 0; }
     .detail-canvas {
+      position: relative;
       border: 1px solid #e6e8ef;
       border-radius: 8px;
       background: #fff;
@@ -1188,13 +1184,55 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       width: 100%;
       height: auto;
     }
+    .detail-track-overlays {
+      position: absolute;
+      inset: 8px 0;
+      pointer-events: none;
+    }
+    .detail-track-control {
+      position: absolute;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 2px 4px;
+      background: rgba(255,255,255,.94);
+      border-radius: 4px;
+      cursor: grab;
+      user-select: none;
+      z-index: 5;
+      pointer-events: auto;
+    }
+    .detail-track-control.dragging { opacity: .55; }
+    .detail-track-name {
+      max-width: 118px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: Arial, sans-serif;
+      font-size: 13px;
+      font-weight: 600;
+      color: #333;
+    }
+    .detail-track-select {
+      width: 72px;
+      height: 22px;
+      padding: 0 18px 0 6px;
+      border: 1px solid #d6d9e6;
+      border-radius: 4px;
+      background: #fff;
+      color: #333;
+      font-size: 11px;
+      cursor: pointer;
+    }
     .detail-label { font-family: Arial, sans-serif; font-size: 13px; font-weight: 600; fill: #333; }
     .detail-subtext { font-family: Arial, sans-serif; font-size: 11px; fill: #777; }
-    .detail-axis { stroke: #252525; stroke-width: 4; stroke-linecap: round; }
+    .detail-chro { fill: none; stroke: #000; stroke-width: 1.5; }
+    .detail-axis { stroke: #000; stroke-width: 1.5; stroke-linecap: round; }
     .detail-axis-light { stroke: #a9b1c3; stroke-width: 1; }
-    .detail-block { fill: rgba(74,144,217,.18); stroke: rgba(74,144,217,.28); stroke-width: 1; }
-    .detail-block.reverse { fill: rgba(231,126,34,.16); stroke: rgba(231,126,34,.28); }
-    .detail-match { fill: #4a90d9; stroke: none; }
+    .detail-block { fill: #b7b7b7; opacity: .5; stroke: none; }
+    .detail-block.reverse { fill: #b7b7b7; opacity: .5; }
+    .detail-match { fill: #607b8b; opacity: .45; stroke: none; }
     .detail-ref-gene { fill: #667eea; stroke: #5364c9; stroke-width: 1; }
     .detail-variant.snp { fill: orange; stroke: #b76d00; }
     .detail-variant.indel { fill: blue; stroke: #176a95; }
@@ -1220,6 +1258,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     @media (max-width: 900px) {
       body { padding: 10px; }
       .detail-layout { display: block; }
+      .detail-track-name { max-width: 92px; }
+      .detail-track-select { width: 62px; }
       .header { padding: 24px 20px; }
       .header-content { gap: 12px; }
       .subtitle { gap: 10px; }
@@ -1275,12 +1315,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     <h2 data-zh="局部比对图" data-en="Local Alignment">局部比对图</h2>
     <div class="viz-container">
       <div class="detail-layout">
-        <div id="controls" class="controls"></div>
         <div id="detail" class="track-stack"></div>
       </div>
       <div class="viz-legend-note">
-        <p data-zh="左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。"
-           data-en="Use the dropdowns on the left to switch candidates; use the up/down buttons or drag tracks to adjust display order.">左侧下拉框切换候选组合；上移/下移按钮或拖动轨道可调整显示顺序。</p>
+        <p data-zh="轨道名右侧下拉框可切换候选片段；拖动轨道名可调整显示顺序。"
+           data-en="Use the dropdown next to a track name to switch candidates; drag track names to reorder tracks.">轨道名右侧下拉框可切换候选片段；拖动轨道名可调整显示顺序。</p>
       </div>
     </div>
   </div>
@@ -1582,29 +1621,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function renderControls() {
       const root = document.getElementById('controls');
-      root.innerHTML = `<h3>${t('candidateSwitch')}</h3><div class="track-card-list"></div>`;
-      const list = root.querySelector('.track-card-list');
-      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
-      for (const trackId of order) {
-        const track = trackById(trackId);
-        const row = document.createElement('details');
-        row.className = 'control-row track-card';
-        row.open = true;
-        row.dataset.trackId = trackId;
-        row.innerHTML = `<summary class="track-card-summary"><span class="track-card-name" title="${esc(track.name || trackId)}">${esc(track.name || trackId)}</span><span class="track-card-toggle"></span></summary><div class="track-card-body"></div>`;
-        const body = row.querySelector('.track-card-body');
-        if (trackId === 'ref') {
-          body.innerHTML = `<div class="track-card-meta">${t('reference')}</div><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
-        } else {
-          const options = (reportData.candidates[trackId] || []).map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`).join('');
-          body.innerHTML = `<select>${options}</select><button title="${t('moveUp')}">↑</button><button title="${t('moveDown')}">↓</button>`;
-          body.querySelector('select').onchange = e => { state.selected[trackId] = e.target.value; renderOverview(); renderDetail(); };
-        }
-        body.querySelectorAll('button')[0].onclick = () => moveTrack(trackId, -1);
-        body.querySelectorAll('button')[1].onclick = () => moveTrack(trackId, 1);
-        wireControlDrag(row);
-        list.appendChild(row);
-      }
+      if (root) root.innerHTML = '';
     }
     function moveTrack(trackId, delta) {
       const index = state.order.indexOf(trackId);
@@ -1615,14 +1632,43 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderControls();
       renderDetail();
     }
-    function wireControlDrag(row) {
-      const summary = row.querySelector('.track-card-summary');
-      summary.draggable = true;
-      summary.addEventListener('dragstart', e => {
-        row.classList.add('dragging');
-        e.dataTransfer.setData('text/plain', row.dataset.trackId);
+    function wireDetailTrackControls() {
+      document.querySelectorAll('.detail-track-control').forEach(row => {
+        row.draggable = true;
+        row.addEventListener('dragstart', e => {
+          if (e.target.closest('select')) {
+            e.preventDefault();
+            return;
+          }
+          row.classList.add('dragging');
+          e.dataTransfer.setData('text/plain', row.dataset.trackId);
+        });
+        row.addEventListener('dragend', () => row.classList.remove('dragging'));
+        row.addEventListener('dragover', e => e.preventDefault());
+        row.addEventListener('drop', e => {
+          e.preventDefault();
+          const dragged = e.dataTransfer.getData('text/plain');
+          const target = row.dataset.trackId;
+          if (!dragged || dragged === target) return;
+          state.order = state.order.filter(id => id !== dragged);
+          const index = state.order.indexOf(target);
+          state.order.splice(index < 0 ? state.order.length : index, 0, dragged);
+          renderDetail();
+        });
+        const select = row.querySelector('select');
+        if (select) {
+          select.addEventListener('mousedown', e => e.stopPropagation());
+          select.addEventListener('click', e => e.stopPropagation());
+          select.addEventListener('dragstart', e => e.preventDefault());
+          select.onchange = e => {
+            state.selected[row.dataset.trackId] = e.target.value;
+            renderOverview();
+            renderDetail();
+          };
+        }
       });
-      summary.addEventListener('dragend', () => row.classList.remove('dragging'));
+    }
+    function wireControlDrag(row) {
       row.addEventListener('dragover', e => e.preventDefault());
       row.addEventListener('drop', e => {
         e.preventDefault();
@@ -1658,15 +1704,26 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const fragments = [];
       const ribbons = [];
       const markers = [];
+      const overlays = [];
 
       for (const row of rows) {
         const y = rowY(row);
         const subtitle = row.trackId === 'ref'
           ? `${t('reference')} · ${row.range.start}-${row.range.end}`
           : `${row.candidate.candidate_id} · ${row.candidate.query_chr}:${row.range.start}-${row.range.end}`;
-        fragments.push(`<text class="detail-label" x="${plotLeft - 14}" y="${y + 4}" text-anchor="end">${esc(row.track.name || row.trackId)}</text>`);
+        const overlayTop = ((y / height) * 100).toFixed(3);
+        const overlayWidth = `calc(${((plotLeft / width) * 100).toFixed(3)}% - 16px)`;
+        const trackTitle = esc(row.track.name || row.trackId);
+        if (row.trackId === 'ref') {
+          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span></div>`);
+        } else {
+          const options = (reportData.candidates[row.trackId] || [])
+            .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[row.trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
+            .join('');
+          overlays.push(`<div class="detail-track-control" data-track-id="${esc(row.trackId)}" title="${trackTitle}" style="left:8px; top:${overlayTop}%; width:${overlayWidth}; transform:translateY(-50%);"><span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`);
+        }
         fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 27}">${esc(subtitle)}</text>`);
-        fragments.push(`<line class="detail-axis" x1="${plotLeft}" y1="${y}" x2="${plotLeft + plotWidth}" y2="${y}"></line>`);
+        fragments.push(`<rect class="detail-chro" x="${plotLeft}" y="${y - 8}" width="${plotWidth}" height="16" rx="0"></rect>`);
         fragments.push(`<text class="detail-subtext" x="${plotLeft}" y="${y + 16}">${Number(row.range.start).toLocaleString()}</text>`);
         fragments.push(`<text class="detail-subtext" x="${plotLeft + plotWidth}" y="${y + 16}" text-anchor="end">${Number(row.range.end).toLocaleString()}</text>`);
 
@@ -1720,7 +1777,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         }
       }
 
-      root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg></div>`;
+      root.innerHTML = `<div class="detail-canvas"><svg class="detail-svg" viewBox="0 0 ${width} ${height}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="multi-track local alignment">${ribbons.join('')}${fragments.join('')}${markers.join('')}</svg><div class="detail-track-overlays">${overlays.join('')}</div></div>`;
+      wireDetailTrackControls();
     }
     function renderOutputs() {
       const rows = [`<tr><th>${t('filename')}</th><th>${t('description')}</th><th>${t('path')}</th></tr>`];
