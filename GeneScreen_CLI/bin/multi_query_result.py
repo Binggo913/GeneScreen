@@ -983,21 +983,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       max-width: 100%;
       overflow-wrap: anywhere;
     }
-    .stats-table { width: 100%; border-collapse: collapse; margin-bottom: 15px; text-align: center; }
-    .stats-table th {
-      padding: 12px 15px;
-      background: #f9f9f9;
-      font-weight: 600;
-      color: #666;
-      border-bottom: 2px solid #eee;
-    }
-    .stats-table td {
-      padding: 15px;
-      font-size: 18px;
-      font-weight: 500;
-      color: #333;
-      border-bottom: 1px solid #eee;
-    }
     .file-table { width: 100%; border-collapse: collapse; }
     .file-table th, .file-table td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
     .file-table th { background: #f9f9f9; font-weight: 600; color: #666; }
@@ -1020,56 +1005,51 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     .overview-canvas {
       min-width: 920px;
-      display: grid;
-      grid-template-columns: 150px minmax(0, 1fr);
-      gap: 18px;
-      align-items: start;
+      display: block;
     }
-    .overview-ref {
-      position: sticky;
-      left: 0;
-      min-height: 100%;
-      border-left: 3px solid #222;
-      border-bottom: 3px solid #222;
-      padding: 12px 0 18px 18px;
-      font-weight: 600;
-      color: #333;
-    }
-    .overview-ref-title { font-size: 15px; margin-bottom: 8px; }
-    .overview-ref-id { font-size: 12px; color: #777; font-weight: 400; word-break: break-all; }
-    .overview-body { display: grid; gap: 16px; }
+    .overview-body { display: grid; gap: 20px; }
     .chr-group {
       display: grid;
-      grid-template-columns: 96px minmax(0, 1fr);
-      gap: 16px;
+      grid-template-columns: 80px minmax(0, 1fr);
+      gap: 10px;
       align-items: center;
-      padding: 4px 0;
+      padding: 0;
     }
     .chr-label {
-      font-size: 20px;
-      color: #444;
-      font-weight: 600;
+      font-family: Arial, sans-serif;
+      font-size: 12px;
+      color: #333;
+      font-weight: 500;
       text-align: right;
-      padding-right: 4px;
+      padding-right: 10px;
     }
-    .chr-tracks { display: grid; gap: 10px; }
+    .chr-tracks { display: grid; gap: 12px; }
     .overview-track {
       display: grid;
-      grid-template-columns: minmax(120px, 180px) minmax(420px, 1fr);
-      gap: 12px;
+      grid-template-columns: minmax(120px, 160px) minmax(420px, 1fr) 60px;
+      gap: 10px;
       align-items: center;
     }
     .track-label {
+      font-family: Arial, sans-serif;
+      font-size: 12px;
       font-weight: 600;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: #333;
+      text-align: right;
     }
-    .track-subtext { font-size: 12px; color: #777; margin-top: 2px; font-weight: 400; }
+    .track-subtext { font-size: 10px; color: #777; margin-top: 2px; font-weight: 400; }
+    .track-length {
+      font-family: Arial, sans-serif;
+      font-size: 10px;
+      color: #666;
+      white-space: nowrap;
+    }
     .lane {
       position: relative;
-      height: 36px;
+      height: 20px;
       background: transparent;
     }
     .lane::before {
@@ -1077,35 +1057,40 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       position: absolute;
       left: 0;
       right: 0;
-      top: 17px;
-      height: 3px;
-      background: #252525;
+      top: 0;
+      height: 20px;
+      box-sizing: border-box;
+      background: #e0e0e0;
+      border: 1px solid #999;
       border-radius: 3px;
-    }
-    .lane-tick {
-      position: absolute;
-      top: 9px;
-      width: 3px;
-      height: 19px;
-      background: #555;
-      border-radius: 3px;
-      transform: translateX(-50%);
     }
     .candidate {
       position: absolute;
-      top: 12px;
-      height: 12px;
+      top: 2px;
+      height: 16px;
       min-width: 3px;
-      background: #4f86d9;
-      border: 1px solid #2f5f9f;
-      border-radius: 999px;
+      background: #4a90d9;
+      border: none;
+      border-radius: 0;
       cursor: pointer;
       transition: transform .12s ease, box-shadow .12s ease;
     }
-    .candidate:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(46,99,199,.25); }
+    .candidate:hover { background: #2d6cb5; transform: translateY(-1px); }
     .candidate.best { background: #159447; border-color: #0f6c34; }
-    .candidate.selected { outline: 2px solid #111; outline-offset: 3px; }
-    .candidate-ref { background: #667eea; border-color: #5364c9; left: 8%; width: 84%; }
+    .candidate.best:hover { background: #0f6c34; }
+    .candidate.selected { outline: 2px solid #e53935; outline-offset: 2px; }
+    .candidate.selected::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      bottom: -12px;
+      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 6px solid transparent;
+      border-right: 6px solid transparent;
+      border-bottom: 8px solid #e53935;
+    }
     .viz-legend-note {
       margin-top: 15px;
       padding: 10px 15px;
@@ -1234,14 +1219,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     <table class="file-table" id="genomeTable"></table>
   </div>
 
-  <div class="section stats-section">
-    <h2 data-zh="结果统计" data-en="Statistics">结果统计</h2>
-    <table class="stats-table">
-      <thead><tr id="statsHead"></tr></thead>
-      <tbody><tr id="statsBody"></tr></tbody>
-    </table>
-  </div>
-
   <div class="section overview-section visualization-section">
     <h2 data-zh="宏观比对图" data-en="Alignment Overview">宏观比对图</h2>
     <div class="viz-container">
@@ -1356,7 +1333,6 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderHeader();
       renderInit();
       renderGenomes();
-      renderStats();
       renderOverview();
       renderControls();
       renderDetail();
@@ -1477,26 +1453,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       }
       document.getElementById('genomeTable').innerHTML = rows.join('');
     }
-    function renderStats() {
-      const s = reportData.statistics || {};
-      const variants = (s.selected_combination && s.selected_combination.variants) || {};
-      const indelTotal = variants.INDEL || ((variants.INS || 0) + (variants.DEL || 0));
-      const metrics = [
-        [t('genomes'), s.genome_count || 0],
-        [t('queryGenomes'), s.query_count || 0],
-        [t('candidates'), s.total_candidate_count || 0],
-        [t('visibleLinks'), (s.selected_combination && s.selected_combination.link_count) || 0],
-        [t('snpCount'), variants.SNP || 0],
-        [t('indelCount'), indelTotal],
-        ['INS', variants.INS || 0],
-        ['DEL', variants.DEL || 0]
-      ];
-      document.getElementById('statsHead').innerHTML = metrics.map(m => `<th>${m[0]}</th>`).join('');
-      document.getElementById('statsBody').innerHTML = metrics.map(m => `<td>${m[1]}</td>`).join('');
-    }
     function renderOverview() {
       const root = document.getElementById('overview');
-      const input = reportData.input || {};
       const chrMap = new Map();
       for (const qid of queryIds()) {
         for (const candidate of reportData.candidates[qid] || []) {
@@ -1506,37 +1464,36 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         }
       }
       if (!chrMap.size) { root.innerHTML = `<div class="empty">${t('noCandidates')}</div>`; return; }
-      const refTitle = esc((reportData.genomes && reportData.genomes.ref && reportData.genomes.ref.name) || 'ref-gene');
-      const refId = esc(input.id || input.safe_id || 'A1');
       const body = document.createElement('div');
       body.className = 'overview-body';
-      root.innerHTML = `<div class="overview-ref"><div class="overview-ref-title">${refTitle}</div><div class="overview-ref-id">${refId}</div></div>`;
+      root.innerHTML = '';
       root.appendChild(body);
-      const chrNames = Array.from(chrMap.keys()).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+      const chrScore = chr => (chrMap.get(chr) || []).reduce((sum, entry) => sum + Number(entry.candidate.total_aln_len || 0), 0);
+      const chrNames = Array.from(chrMap.keys()).sort((a, b) => {
+        const scoreDelta = chrScore(b) - chrScore(a);
+        return scoreDelta || String(a).localeCompare(String(b), undefined, { numeric: true });
+      });
       for (const chr of chrNames) {
         const entries = chrMap.get(chr);
-        const rangeStart = Math.min(...entries.map(e => e.bounds.start));
-        const rangeEnd = Math.max(...entries.map(e => e.bounds.end), rangeStart + 1);
+        const rangeStart = 0;
+        const rangeEnd = Math.max(...entries.map(e => e.bounds.end), 1);
         const group = document.createElement('div');
         group.className = 'chr-group';
-        group.innerHTML = `<div class="chr-label">chr ${esc(chr)}</div><div class="chr-tracks"></div>`;
+        group.innerHTML = `<div class="chr-label">${esc(chr)}</div><div class="chr-tracks"></div>`;
         const tracks = group.querySelector('.chr-tracks');
+        const lenLabel = formatLength(rangeEnd);
         for (const qid of queryIds()) {
           const candidates = entries.filter(e => e.qid === qid).map(e => e.candidate);
           if (!candidates.length) continue;
           const track = trackById(qid);
           const row = document.createElement('div');
           row.className = 'overview-track';
-          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} ${t('candidateUnit')}</div></div><div class="lane"></div>`;
+          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} ${t('candidateUnit')}</div></div><div class="lane"></div><div class="track-length">${lenLabel}</div>`;
           const lane = row.querySelector('.lane');
           for (const candidate of candidates) {
             const bounds = candidateBounds(candidate);
             const left = ((bounds.start - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * 100;
             const width = Math.max(0.8, ((bounds.end - bounds.start) / Math.max(1, rangeEnd - rangeStart)) * 100);
-            const tick = document.createElement('div');
-            tick.className = 'lane-tick';
-            tick.style.left = `${Math.max(0, Math.min(100, left + width / 2))}%`;
-            lane.appendChild(tick);
             const el = document.createElement('div');
             el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
             const region = candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`;
@@ -1550,6 +1507,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         }
         body.appendChild(group);
       }
+    }
+    function formatLength(value) {
+      const length = Number(value) || 0;
+      if (length >= 1e6) return `${(length / 1e6).toFixed(1)}Mb`;
+      if (length >= 1e3) return `${(length / 1e3).toFixed(1)}kb`;
+      return `${Math.max(0, Math.round(length))}bp`;
     }
     function renderControls() {
       const root = document.getElementById('controls');
