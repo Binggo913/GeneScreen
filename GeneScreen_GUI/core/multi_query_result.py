@@ -608,9 +608,10 @@ def _process_linkview_svg_file(svg_path: str) -> None:
         width = int(width_match.group(1))
         height = int(height_match.group(1))
         top_margin = 90
+        bottom_margin = 70
         svg = re.sub(
             r'<svg\s+width="[^"]*"\s+height="[^"]*"',
-            f'<svg width="{width}" height="{height + top_margin}" viewBox="0 -{top_margin} {width} {height + top_margin}" preserveAspectRatio="xMidYMid meet"',
+            f'<svg width="{width}" height="{height + top_margin + bottom_margin}" viewBox="0 -{top_margin} {width} {height + top_margin + bottom_margin}" preserveAspectRatio="xMidYMid meet"',
             svg,
             count=1,
         )
@@ -1944,6 +1945,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     .detail-linkview-svg {
       min-height: 220px;
       min-width: 0;
+      box-sizing: border-box;
     }
     .detail-svg {
       display: block;
@@ -1978,6 +1980,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       pointer-events: auto;
     }
     .detail-track-control.dragging { opacity: .55; }
+    .detail-track-control.drop-before {
+      box-shadow: 0 -3px 0 #667eea;
+    }
+    .detail-track-control.drop-after {
+      box-shadow: 0 3px 0 #667eea;
+    }
     .detail-track-control.ref-control {
       background: transparent;
       cursor: grab;
@@ -1994,7 +2002,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     .detail-track-control:hover .detail-drag-handle { opacity: .95; }
     .detail-track-name {
-      max-width: 88px;
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: none;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -2004,7 +2014,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       color: #333;
     }
     .detail-track-select {
-      width: 56px;
+      flex: 0 0 62px;
+      width: 62px;
       height: 22px;
       padding: 0 16px 0 5px;
       border: 1px solid #d6d9e6;
@@ -2358,7 +2369,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       window.addEventListener('resize', () => {
         clearTimeout(resizeAlignTimer);
         resizeAlignTimer = setTimeout(() => {
-          document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => alignTrackControls(svg, state.order.length ? state.order.slice() : ['ref'].concat(queryIds())));
+          const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+          document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => {
+            ensureDetailGutter(svg, order);
+            requestAnimationFrame(() => alignTrackControls(svg, order));
+          });
         }, 80);
       });
     }
@@ -2577,6 +2592,24 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function syncOpenZoomModal() {
       if (isZoomModalOpen()) renderZoomModalBody();
     }
+    function clearDropHints(root = document) {
+      root.querySelectorAll('.detail-track-control.drop-before,.detail-track-control.drop-after').forEach(row => {
+        row.classList.remove('drop-before', 'drop-after');
+      });
+    }
+    function applyTrackDrop(dragged, target, placement) {
+      if (!dragged || dragged === target) return;
+      const nextOrder = state.order.filter(id => id !== dragged);
+      const index = nextOrder.indexOf(target);
+      if (index < 0) {
+        nextOrder.push(dragged);
+      } else {
+        nextOrder.splice(placement === 'after' ? index + 1 : index, 0, dragged);
+      }
+      state.order = nextOrder;
+      renderDetail();
+      syncOpenZoomModal();
+    }
     function wireDetailTrackControls(root = document) {
       root.querySelectorAll('.detail-track-control').forEach(row => {
         row.draggable = true;
@@ -2588,18 +2621,28 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           row.classList.add('dragging');
           e.dataTransfer.setData('text/plain', row.dataset.trackId);
         });
-        row.addEventListener('dragend', () => row.classList.remove('dragging'));
-        row.addEventListener('dragover', e => e.preventDefault());
+        row.addEventListener('dragend', () => {
+          row.classList.remove('dragging');
+          clearDropHints(root);
+        });
+        row.addEventListener('dragover', e => {
+          e.preventDefault();
+          const rect = row.getBoundingClientRect();
+          const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+          clearDropHints(root);
+          row.classList.add(placement === 'after' ? 'drop-after' : 'drop-before');
+        });
+        row.addEventListener('dragleave', e => {
+          if (!row.contains(e.relatedTarget)) row.classList.remove('drop-before', 'drop-after');
+        });
         row.addEventListener('drop', e => {
           e.preventDefault();
           const dragged = e.dataTransfer.getData('text/plain');
           const target = row.dataset.trackId;
-          if (!dragged || dragged === target) return;
-          state.order = state.order.filter(id => id !== dragged);
-          const index = state.order.indexOf(target);
-          state.order.splice(index < 0 ? state.order.length : index, 0, dragged);
-          renderDetail();
-          syncOpenZoomModal();
+          const rect = row.getBoundingClientRect();
+          const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+          clearDropHints(root);
+          applyTrackDrop(dragged, target, placement);
         });
         const select = row.querySelector('select');
         if (select) {
@@ -2695,12 +2738,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const trackTitle = esc(track.name || trackId);
         const handle = `<span class="detail-drag-handle" title="${t('dragTrack')}"></span>`;
         if (trackId === 'ref') {
-          return `<div class="detail-track-control ref-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:170px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span></div>`;
+          return `<div class="detail-track-control ref-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:220px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span></div>`;
         }
         const options = (reportData.candidates[trackId] || [])
           .map(c => `<option value="${esc(c.candidate_id)}" ${state.selected[trackId] === c.candidate_id ? 'selected' : ''}>${esc(c.candidate_id)}</option>`)
           .join('');
-        return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:170px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
+        return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:220px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
       }).join('');
     }
     function showSvgTooltip(content, event, tooltip) {
@@ -2808,6 +2851,28 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (vb && vb.width && vb.height) return vb;
       return { x: 0, y: 0, width: Number(svg.getAttribute('width') || 1200), height: Number(svg.getAttribute('height') || 400) };
     }
+    function trackPixelLeft(svg, trackRect, overlay) {
+      const svgRect = svg.getBoundingClientRect();
+      const overlayRect = overlay.getBoundingClientRect();
+      const viewBox = svgViewBox(svg);
+      const x = Number(trackRect.getAttribute('x') || 0);
+      return svgRect.left - overlayRect.left + ((x - viewBox.x) / viewBox.width) * svgRect.width;
+    }
+    function ensureDetailGutter(svg, order) {
+      const canvas = svg.closest('.detail-canvas');
+      const host = canvas ? canvas.querySelector('.detail-linkview-svg') : null;
+      const overlay = canvas ? canvas.querySelector('.detail-track-overlays') : null;
+      if (!canvas || !host || !overlay) return;
+      host.style.paddingLeft = '0px';
+      host.style.paddingRight = '0px';
+      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      if (!chros.length) return;
+      const controls = Array.from(overlay.querySelectorAll('.detail-track-control'));
+      const requiredWidth = Math.max(0, ...controls.map(control => control.getBoundingClientRect().width || 220)) + 24;
+      const firstTrackLeft = Math.min(...chros.map(rect => trackPixelLeft(svg, rect, overlay)));
+      const deficit = Math.ceil(requiredWidth - firstTrackLeft);
+      if (deficit > 0) host.style.paddingLeft = `${deficit}px`;
+    }
     function alignTrackControls(svg, order) {
       const canvas = svg.closest('.detail-canvas');
       const overlay = canvas ? canvas.querySelector('.detail-track-overlays') : null;
@@ -2824,13 +2889,39 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const x = Number(rect.getAttribute('x') || 0);
         const y = Number(rect.getAttribute('y') || 0);
         const height = Number(rect.getAttribute('height') || 0);
-        const controlWidth = control.getBoundingClientRect().width || 170;
+        const controlWidth = control.getBoundingClientRect().width || 220;
         const xPx = svgRect.left - overlayRect.left + ((x - viewBox.x) / viewBox.width) * svgRect.width;
         const yPx = svgRect.top - overlayRect.top + (((y + height / 2) - viewBox.y) / viewBox.height) * svgRect.height;
         const left = Math.max(10, Math.min(overlayRect.width - controlWidth - 8, xPx - controlWidth - 14));
         control.style.left = `${left}px`;
         control.style.top = `${Math.max(14, yPx)}px`;
         control.style.transform = 'translateY(-50%)';
+      });
+    }
+    function nudgeScaleBar(svg) {
+      svg.querySelectorAll('.detail-scale-shift').forEach(el => el.classList.remove('detail-scale-shift'));
+      const texts = Array.from(svg.querySelectorAll('text'));
+      const scaleTexts = texts.filter(text => {
+        const label = (text.textContent || '').trim();
+        const fontSize = Number(String(text.getAttribute('font-size') || '').replace(/[^\d.]/g, '')) || 0;
+        return /^\d[\d,.\s]*bp$/i.test(label) && fontSize >= 14;
+      });
+      scaleTexts.forEach(text => {
+        const x = Number(text.getAttribute('x') || 0);
+        const y = Number(text.getAttribute('y') || 0);
+        const shift = 22;
+        text.setAttribute('transform', `${text.getAttribute('transform') || ''} translate(0 ${shift})`.trim());
+        text.classList.add('detail-scale-shift');
+        svg.querySelectorAll('line,path').forEach(el => {
+          const y1 = Number(el.getAttribute('y1') || el.getAttribute('y') || NaN);
+          const y2 = Number(el.getAttribute('y2') || el.getAttribute('y') || NaN);
+          const x1 = Number(el.getAttribute('x1') || el.getAttribute('x') || NaN);
+          const x2 = Number(el.getAttribute('x2') || el.getAttribute('x') || NaN);
+          if (Number.isFinite(y1) && Number.isFinite(y2) && Math.abs(Math.max(y1, y2) - y) < 36 && Number.isFinite(x1) && Number.isFinite(x2) && Math.abs(((x1 + x2) / 2) - x) < 180) {
+            el.setAttribute('transform', `${el.getAttribute('transform') || ''} translate(0 ${shift})`.trim());
+            el.classList.add('detail-scale-shift');
+          }
+        });
       });
     }
     function addGeneBracket(svg, order, ranges) {
@@ -2905,7 +2996,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         });
       });
       addGeneBracket(svg, order, ranges);
-      requestAnimationFrame(() => alignTrackControls(svg, order));
+      nudgeScaleBar(svg);
+      requestAnimationFrame(() => {
+        ensureDetailGutter(svg, order);
+        requestAnimationFrame(() => alignTrackControls(svg, order));
+      });
       const markers = resolveLinkviewMarkers(order);
       allMarkerRects(svg).forEach((rect, index) => {
         const meta = markers[index] || {};
