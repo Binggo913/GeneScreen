@@ -1007,26 +1007,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       min-width: 920px;
       display: block;
     }
-    .overview-body { display: grid; gap: 20px; }
-    .chr-group {
-      display: grid;
-      grid-template-columns: 80px minmax(0, 1fr);
-      gap: 10px;
-      align-items: center;
-      padding: 0;
-    }
-    .chr-label {
-      font-family: Arial, sans-serif;
-      font-size: 12px;
-      color: #333;
-      font-weight: 500;
-      text-align: right;
-      padding-right: 10px;
-    }
+    .overview-body { display: grid; gap: 12px; }
+    .chr-group { display: block; padding: 0; }
     .chr-tracks { display: grid; gap: 12px; }
     .overview-track {
       display: grid;
-      grid-template-columns: minmax(120px, 160px) minmax(420px, 1fr) 60px;
+      grid-template-columns: minmax(150px, 190px) minmax(520px, 1fr);
       gap: 10px;
       align-items: center;
     }
@@ -1040,8 +1026,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       color: #333;
       text-align: right;
     }
-    .track-subtext { font-size: 10px; color: #777; margin-top: 2px; font-weight: 400; }
+    .track-area {
+      position: relative;
+      min-width: 520px;
+      height: 20px;
+    }
     .track-length {
+      position: absolute;
+      top: 3px;
       font-family: Arial, sans-serif;
       font-size: 10px;
       color: #666;
@@ -1076,9 +1068,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       transition: transform .12s ease, box-shadow .12s ease;
     }
     .candidate:hover { background: #2d6cb5; transform: translateY(-1px); }
-    .candidate.best { background: #159447; border-color: #0f6c34; }
-    .candidate.best:hover { background: #0f6c34; }
-    .candidate.selected { outline: 2px solid #e53935; outline-offset: 2px; }
+    .candidate.selected { outline: none; }
     .candidate.selected::after {
       content: '';
       position: absolute;
@@ -1090,6 +1080,19 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       border-left: 6px solid transparent;
       border-right: 6px solid transparent;
       border-bottom: 8px solid #e53935;
+    }
+    .candidate-primary-label {
+      position: absolute;
+      left: 50%;
+      top: -14px;
+      transform: translateX(-50%);
+      font-family: Arial, sans-serif;
+      font-size: 9px;
+      color: #1d4ed8;
+      font-weight: 700;
+      line-height: 1;
+      pointer-events: none;
+      white-space: nowrap;
     }
     .viz-legend-note {
       margin-top: 15px;
@@ -1183,7 +1186,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       .subtitle { gap: 10px; }
       .section { padding: 20px 16px; }
       .overview-canvas { grid-template-columns: 120px minmax(650px, 1fr); }
-      .overview-track { grid-template-columns: 120px minmax(420px, 1fr); }
+      .overview-track { grid-template-columns: 150px minmax(520px, 1fr); }
       .controls { margin-bottom: 14px; }
     }
   </style>
@@ -1224,8 +1227,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     <div class="viz-container">
       <div id="overview" class="overview-canvas"></div>
       <div class="viz-legend-note">
-        <p data-zh="绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 data.json，切换显示不会重新计算。"
-           data-en="Green blocks indicate the best candidate for each query genome; click a candidate to switch the local combination below. Data comes from data.json and switching does not recompute.">绿色块表示每个查询基因组的最优候选；点击候选块可切换下方局部组合。数据来自 data.json，切换显示不会重新计算。</p>
+        <p data-zh="点击比对区域可跳转到对应的局部比对图"
+           data-en="Click alignment region to jump to the corresponding local alignment">点击比对区域可跳转到对应的局部比对图</p>
       </div>
     </div>
   </div>
@@ -1279,7 +1282,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       genomes: { zh: '基因组', en: 'Genomes' },
       queryGenomes: { zh: '查询基因组', en: 'Query Genomes' },
       candidates: { zh: '候选片段', en: 'Candidates' },
-      candidateUnit: { zh: 'candidates', en: 'candidates' },
+      primaryCandidate: { zh: '主', en: 'Primary' },
       visibleLinks: { zh: '可见连接', en: 'Visible Links' },
       snpCount: { zh: 'SNP 数量', en: 'SNP Count' },
       indelCount: { zh: 'Indel 数量', en: 'Indel Count' },
@@ -1473,34 +1476,55 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         const scoreDelta = chrScore(b) - chrScore(a);
         return scoreDelta || String(a).localeCompare(String(b), undefined, { numeric: true });
       });
+      const trackLength = (chr, qid) => {
+        const entries = (chrMap.get(chr) || []).filter(e => e.qid === qid);
+        return Math.max(...entries.map(e => e.bounds.end), 1);
+      };
+      const visibleTrackLengths = [];
+      for (const chr of chrNames) {
+        for (const qid of queryIds()) {
+          if ((chrMap.get(chr) || []).some(e => e.qid === qid)) {
+            visibleTrackLengths.push(trackLength(chr, qid));
+          }
+        }
+      }
+      const maxTrackLength = Math.max(...visibleTrackLengths, 1);
       for (const chr of chrNames) {
         const entries = chrMap.get(chr);
-        const rangeStart = 0;
-        const rangeEnd = Math.max(...entries.map(e => e.bounds.end), 1);
         const group = document.createElement('div');
         group.className = 'chr-group';
-        group.innerHTML = `<div class="chr-label">${esc(chr)}</div><div class="chr-tracks"></div>`;
+        group.innerHTML = `<div class="chr-tracks"></div>`;
         const tracks = group.querySelector('.chr-tracks');
-        const lenLabel = formatLength(rangeEnd);
         for (const qid of queryIds()) {
           const candidates = entries.filter(e => e.qid === qid).map(e => e.candidate);
           if (!candidates.length) continue;
           const track = trackById(qid);
+          const rowLabel = `${formatChrName(chr)}_${track.name || qid}`;
+          const rangeStart = 0;
+          const rangeEnd = trackLength(chr, qid);
+          const trackWidth = Math.max(8, (rangeEnd / maxTrackLength) * 100);
+          const lenLabel = formatLength(rangeEnd);
           const row = document.createElement('div');
           row.className = 'overview-track';
-          row.innerHTML = `<div class="track-label" title="${esc(track.name)}">${esc(track.name)}<div class="track-subtext">${candidates.length} ${t('candidateUnit')}</div></div><div class="lane"></div><div class="track-length">${lenLabel}</div>`;
+          row.innerHTML = `<div class="track-label" title="${esc(rowLabel)}">${esc(rowLabel)}</div><div class="track-area"><div class="lane" style="width:${trackWidth}%"></div><div class="track-length" style="left:calc(${trackWidth}% + 5px)">${lenLabel}</div></div>`;
           const lane = row.querySelector('.lane');
           for (const candidate of candidates) {
             const bounds = candidateBounds(candidate);
             const left = ((bounds.start - rangeStart) / Math.max(1, rangeEnd - rangeStart)) * 100;
             const width = Math.max(0.8, ((bounds.end - bounds.start) / Math.max(1, rangeEnd - rangeStart)) * 100);
             const el = document.createElement('div');
-            el.className = 'candidate' + (candidate.is_best ? ' best' : '') + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
+            el.className = 'candidate' + (state.selected[qid] === candidate.candidate_id ? ' selected' : '');
             const region = candidate.query_region_start ? `${candidate.query_chr}:${candidate.query_region_start}-${candidate.query_region_end}` : `${candidate.query_chr}:${candidate.query_start}-${candidate.query_end}`;
             el.style.left = `${Math.max(0, Math.min(99, left))}%`;
             el.style.width = `${Math.max(0.8, Math.min(width, 100 - left))}%`;
             el.title = `${candidate.candidate_id} ${region} identity=${candidate.identity || '-'} coverage=${candidate.coverage || '-'}`;
             el.onclick = () => { state.selected[qid] = candidate.candidate_id; renderOverview(); renderControls(); renderDetail(); };
+            if (candidate.is_best) {
+              const primaryLabel = document.createElement('span');
+              primaryLabel.className = 'candidate-primary-label';
+              primaryLabel.textContent = t('primaryCandidate');
+              el.appendChild(primaryLabel);
+            }
             lane.appendChild(el);
           }
           tracks.appendChild(row);
@@ -1513,6 +1537,10 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (length >= 1e6) return `${(length / 1e6).toFixed(1)}Mb`;
       if (length >= 1e3) return `${(length / 1e3).toFixed(1)}kb`;
       return `${Math.max(0, Math.round(length))}bp`;
+    }
+    function formatChrName(value) {
+      const text = String(value || 'chr');
+      return text.toLowerCase().startsWith('chr') ? text : `chr${text}`;
     }
     function renderControls() {
       const root = document.getElementById('controls');
