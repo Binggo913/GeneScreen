@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QRect, QRectF, QSize
+from PySide6.QtCore import QEvent, QPoint, QPointF, Qt, QRect, QRectF, QSize
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -71,6 +71,19 @@ def _draw_checkbox_indicator(
 class TableCheckBoxDelegate(QStyledItemDelegate):
     """Paint table checkbox items centered in the real cell rectangle."""
 
+    def __init__(self, table: QTableWidget):
+        super().__init__(table)
+        self._table = table
+        self._hovered_cell: Optional[tuple[int, int]] = None
+
+    def eventFilter(self, watched, event):
+        if watched is self._table.viewport():
+            if event.type() == QEvent.Type.MouseMove:
+                self._set_hovered_cell(self._cell_at_event(event))
+            elif event.type() in (QEvent.Type.Leave, QEvent.Type.MouseButtonPress):
+                self._set_hovered_cell(None)
+        return super().eventFilter(watched, event)
+
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
@@ -94,9 +107,42 @@ class TableCheckBoxDelegate(QStyledItemDelegate):
             opt.palette,
             bool(index.data(TABLE_CHECKBOX_CHECKED_ROLE)),
             enabled=bool(opt.state & QStyle.State_Enabled),
-            hovered=bool(opt.state & QStyle.State_MouseOver),
+            hovered=self._hovered_cell == (index.row(), index.column()),
         )
         painter.restore()
+
+    def _cell_at_event(self, event) -> Optional[tuple[int, int]]:
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        index = self._table.indexAt(pos)
+        if not index.isValid() or index.column() != 0:
+            return None
+        indicator_rect = self._indicator_rect_for_cell(self._table.visualRect(index))
+        if not indicator_rect.contains(pos):
+            return None
+        return (index.row(), index.column())
+
+    def _indicator_rect_for_cell(self, cell_rect: QRect) -> QRect:
+        indicator_rect = QRect(
+            QPoint(0, 0),
+            QSize(TABLE_CHECKBOX_INDICATOR_SIZE, TABLE_CHECKBOX_INDICATOR_SIZE),
+        )
+        indicator_rect.moveCenter(cell_rect.center())
+        return indicator_rect
+
+    def _set_hovered_cell(self, cell: Optional[tuple[int, int]]) -> None:
+        if cell == self._hovered_cell:
+            return
+        old_cell = self._hovered_cell
+        self._hovered_cell = cell
+        self._update_cell(old_cell)
+        self._update_cell(cell)
+
+    def _update_cell(self, cell: Optional[tuple[int, int]]) -> None:
+        if cell is None:
+            return
+        index = self._table.model().index(cell[0], cell[1])
+        if index.isValid():
+            self._table.viewport().update(self._table.visualRect(index))
 
 
 class CenteredTableCheckBox(QCheckBox):
@@ -185,7 +231,11 @@ def configure_table_checkbox_column(table: QTableWidget) -> None:
     header.setSectionResizeMode(0, QHeaderView.Fixed)
     header.setMinimumHeight(max(header.minimumHeight(), TABLE_CHECKBOX_SIZE + 8))
     table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
-    table.setItemDelegateForColumn(0, TableCheckBoxDelegate(table))
+    table.setMouseTracking(True)
+    table.viewport().setMouseTracking(True)
+    delegate = TableCheckBoxDelegate(table)
+    table.setItemDelegateForColumn(0, delegate)
+    table.viewport().installEventFilter(delegate)
     vertical_header = table.verticalHeader()
     vertical_header.setSectionResizeMode(QHeaderView.Fixed)
     vertical_header.setDefaultSectionSize(
