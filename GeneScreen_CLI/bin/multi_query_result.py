@@ -2834,10 +2834,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       return firstKey ? firstKey.split('||').filter(Boolean) : order;
     }
     function mappedLinkviewOrder(assetOrder) {
-      const detail = reportData.detail || {};
-      const mappedViews = (detail.linkview_svg_order_map || {})[detailSelectionKey()] || {};
-      const mapped = mappedViews[detailOrderKey(assetOrder)];
-      return Array.isArray(mapped) && mapped.length ? mapped.slice() : assetOrder;
+      return Array.isArray(assetOrder) ? assetOrder.slice() : [];
     }
     function resolveLinkviewSvg(order) {
       const detail = reportData.detail || {};
@@ -3170,8 +3167,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function enhanceLinkviewSvg(svg, assetOrder, tooltip) {
       if (!svg) return;
-      const mappedOrder = mappedLinkviewOrder(assetOrder);
-      const effectiveOrder = inferSvgTrackOrder(svg, mappedOrder);
+      const effectiveOrder = mappedLinkviewOrder(assetOrder);
       syncTrackOverlay(svg, effectiveOrder);
       svg.classList.add('detail-linkview-svg-root');
       svg.setAttribute('width', '100%');
