@@ -1298,7 +1298,12 @@ def build_multi_query_payload(
         selected_candidate = candidates[0] if candidates else None
         pair_legacy_report = legacy_report_for(index, query_safe)
         if pair_legacy_report:
-            legacy_entry = report_file_entry(os.path.basename(pair_legacy_report), pair_legacy_report, "单报告", report_dir)
+            legacy_entry = report_file_entry(
+                os.path.basename(pair_legacy_report),
+                pair_legacy_report,
+                f"单报告：{ref_entry_name} vs {query_name}",
+                report_dir,
+            )
             if legacy_entry:
                 legacy_extra_files.append(legacy_entry)
 
@@ -3517,7 +3522,10 @@ __LINKVIEW_SVG_HELPERS_JS__
         if (label === 'data.json' || normalizedPath.endsWith('/data.json')) continue;
         const href = f.href || f.path || '';
         const path = f.path || href || '';
-        const description = String(f.description || '').startsWith('旧版单报告') ? '单报告' : (f.description || '');
+        const rawDescription = String(f.description || '');
+        const description = rawDescription.startsWith('旧版单报告')
+          ? rawDescription.replace(/^旧版单报告/, '单报告')
+          : rawDescription;
         const nameCell = href
           ? `<a href="${esc(href)}" class="file-name-link" title="${esc(path)}">${esc(label)}</a>`
           : `<span class="file-name-disabled">${esc(label)}</span>`;
