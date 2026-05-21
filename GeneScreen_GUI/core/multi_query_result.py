@@ -21,8 +21,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     from .multi_query_report_assets import LINKVIEW_SVG_HELPERS_JS
+    from .multi_query_report_features import read_gene_features
 except ImportError:
     from multi_query_report_assets import LINKVIEW_SVG_HELPERS_JS
+    from multi_query_report_features import read_gene_features
 
 
 def sanitize_path_segment(value: Any, fallback: str = "item") -> str:
@@ -894,6 +896,7 @@ def _generate_linkview_detail_assets(
     order_map: Dict[str, Dict[str, List[str]]] = {}
     marker_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     range_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    gene_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     views = []
 
     for combo in product(*candidate_lists):
@@ -907,6 +910,18 @@ def _generate_linkview_detail_assets(
         range_map[combo_key] = {
             "ref": {"start": 1, "end": max(1, ref_length), "label": ref_alias}
         }
+        gene_map[combo_key] = {}
+        if ref_gff_source:
+            if ref_region:
+                gene_map[combo_key]["ref"] = read_gene_features(
+                    ref_gff_source,
+                    source_chr=ref_region[0],
+                    region_start=ref_region[1],
+                    region_end=ref_region[2],
+                    relative=True,
+                )
+            else:
+                gene_map[combo_key]["ref"] = read_gene_features(ref_gff_source)
         for qid, candidate in selected_candidates.items():
             q_left, q_right = _candidate_region(candidate)
             range_map[combo_key][qid] = {
@@ -915,6 +930,14 @@ def _generate_linkview_detail_assets(
                 "chrom": candidate.get("query_chr"),
                 "label": track_aliases.get(qid, qid),
             }
+            entry = query_entry_by_id.get(qid) or {}
+            gene_map[combo_key][qid] = read_gene_features(
+                entry.get("gff") or entry.get("source_gff"),
+                source_chr=candidate.get("query_chr"),
+                region_start=q_left,
+                region_end=q_right,
+                relative=False,
+            )
 
         for order_tuple in all_orders:
             order = list(order_tuple)
@@ -1146,6 +1169,7 @@ def _generate_linkview_detail_assets(
         "linkview_svg_inline_map": inline_svg_map,
         "linkview_svg_order_map": order_map,
         "linkview_marker_map": marker_map,
+        "linkview_gene_map": gene_map,
         "linkview_views": views,
         "linkview_track_aliases": track_aliases,
         "linkview_track_ranges": range_map,
@@ -2885,6 +2909,20 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         return { trackId, range: ranges[trackId] || fallback || { start: 1, end: 1 } };
       });
     }
+    function currentTrackGenes(order) {
+      const detail = reportData.detail || {};
+      const geneMap = (detail.linkview_gene_map || {})[detailSelectionKey()] || {};
+      return order.map(trackId => {
+        const genes = Array.isArray(geneMap[trackId]) ? geneMap[trackId] : [];
+        if (genes.length || trackId !== 'ref') return genes;
+        const input = reportData.input || {};
+        const info = input.extraction_info || {};
+        const geneStart = Number(info.gene_rel_start || 0);
+        const geneEnd = Number(info.gene_rel_end || 0);
+        if (!geneStart || !geneEnd || !input.id) return [];
+        return [{ id: input.id, label: input.id, start: geneStart, end: geneEnd, strand: info.strand || '' }];
+      });
+    }
     function normalizeTrackToken(value) {
       return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
     }
@@ -3127,49 +3165,53 @@ __LINKVIEW_SVG_HELPERS_JS__
         });
       });
     }
-    function addGeneBracket(svg, order, ranges) {
+    function addGeneBrackets(svg, order, ranges) {
       svg.querySelectorAll('.detail-gene-bracket,.detail-gene-label').forEach(el => el.remove());
-      const refIndex = order.indexOf('ref');
-      if (refIndex < 0) return;
-      const input = reportData.input || {};
-      const info = input.extraction_info || {};
-      const geneStart = Number(info.gene_rel_start || 0);
-      const geneEnd = Number(info.gene_rel_end || 0);
-      if (!geneStart || !geneEnd || !input.id) return;
       const chros = visibleChroRects(svg);
-      const rect = chros[refIndex];
-      const row = ranges[refIndex];
-      if (!rect || !row || !row.range) return;
-      const start = Number(row.range.start || 1);
-      const end = Number(row.range.end || start);
-      const span = Math.max(1, end - start + 1);
-      const x = Number(rect.getAttribute('x') || 0);
-      const y = Number(rect.getAttribute('y') || 0);
-      const width = Number(rect.getAttribute('width') || 0);
-      const height = Number(rect.getAttribute('height') || 0);
-      const x1 = x + ((Math.max(start, geneStart) - start) / span) * width;
-      const x2 = x + ((Math.min(end, geneEnd) - start + 1) / span) * width;
-      if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x2 - x1) < 2) return;
-      const left = Math.min(x1, x2);
-      const right = Math.max(x1, x2);
-      const bracketY = y - 18;
-      const bracketHeight = 14;
-      const curl = 10;
-      const mid = (left + right) / 2;
-      const d = (right - left) > curl * 4
-        ? `M ${left},${bracketY} Q ${left},${bracketY - bracketHeight} ${left + curl},${bracketY - bracketHeight} L ${mid - curl},${bracketY - bracketHeight} Q ${mid},${bracketY - bracketHeight} ${mid},${bracketY - bracketHeight - 6} Q ${mid},${bracketY - bracketHeight} ${mid + curl},${bracketY - bracketHeight} L ${right - curl},${bracketY - bracketHeight} Q ${right},${bracketY - bracketHeight} ${right},${bracketY}`
-        : `M ${left},${bracketY} Q ${mid},${bracketY - bracketHeight - 6} ${right},${bracketY}`;
-      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-      path.setAttribute('d', d);
-      path.setAttribute('class', 'detail-gene-bracket');
-      svg.appendChild(path);
-      const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      label.setAttribute('x', mid);
-      label.setAttribute('y', bracketY - bracketHeight - 10);
-      label.setAttribute('text-anchor', 'middle');
-      label.setAttribute('class', 'detail-gene-label');
-      label.textContent = input.id;
-      svg.appendChild(label);
+      const genesByTrack = currentTrackGenes(order);
+      chros.forEach((rect, trackIndex) => {
+        const row = ranges[trackIndex];
+        const genes = genesByTrack[trackIndex] || [];
+        if (!row || !row.range || !genes.length) return;
+        const start = Number(row.range.start || 1);
+        const end = Number(row.range.end || start);
+        const span = Math.max(1, end - start + 1);
+        const x = Number(rect.getAttribute('x') || 0);
+        const y = Number(rect.getAttribute('y') || 0);
+        const width = Number(rect.getAttribute('width') || 0);
+        const bracketHeight = 14;
+        const curl = 10;
+        genes.forEach((gene, geneIndex) => {
+          const geneStart = Number(gene.start || 0);
+          const geneEnd = Number(gene.end || 0);
+          if (!geneStart || !geneEnd || geneEnd < start || geneStart > end) return;
+          const x1 = x + ((Math.max(start, geneStart) - start) / span) * width;
+          const x2 = x + ((Math.min(end, geneEnd) - start + 1) / span) * width;
+          if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x2 - x1) < 2) return;
+          const left = Math.min(x1, x2);
+          const right = Math.max(x1, x2);
+          const bracketY = y - 18 - geneIndex * 22;
+          const mid = (left + right) / 2;
+          const d = (right - left) > curl * 4
+            ? `M ${left},${bracketY} Q ${left},${bracketY - bracketHeight} ${left + curl},${bracketY - bracketHeight} L ${mid - curl},${bracketY - bracketHeight} Q ${mid},${bracketY - bracketHeight} ${mid},${bracketY - bracketHeight - 6} Q ${mid},${bracketY - bracketHeight} ${mid + curl},${bracketY - bracketHeight} L ${right - curl},${bracketY - bracketHeight} Q ${right},${bracketY - bracketHeight} ${right},${bracketY}`
+            : `M ${left},${bracketY} Q ${mid},${bracketY - bracketHeight - 6} ${right},${bracketY}`;
+          const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          path.setAttribute('d', d);
+          path.setAttribute('class', 'detail-gene-bracket');
+          path.dataset.trackId = row.trackId || '';
+          path.dataset.geneId = gene.id || gene.label || '';
+          svg.appendChild(path);
+          const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+          label.setAttribute('x', mid);
+          label.setAttribute('y', bracketY - bracketHeight - 10);
+          label.setAttribute('text-anchor', 'middle');
+          label.setAttribute('class', 'detail-gene-label');
+          label.dataset.trackId = row.trackId || '';
+          label.dataset.geneId = gene.id || gene.label || '';
+          label.textContent = gene.label || gene.id || 'gene';
+          svg.appendChild(label);
+        });
+      });
     }
     function enhanceLinkviewSvg(svg, assetOrder, tooltip) {
       if (!svg) return;
@@ -3200,7 +3242,7 @@ __LINKVIEW_SVG_HELPERS_JS__
           svg.appendChild(text);
         });
       });
-      addGeneBracket(svg, effectiveOrder, ranges);
+      addGeneBrackets(svg, effectiveOrder, ranges);
       nudgeScaleBar(svg);
       requestAnimationFrame(() => {
         ensureDetailGutter(svg, effectiveOrder);
