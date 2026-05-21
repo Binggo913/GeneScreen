@@ -3242,7 +3242,9 @@ __LINKVIEW_SVG_HELPERS_JS__
           svg.appendChild(text);
         });
       });
-      addGeneBrackets(svg, effectiveOrder, ranges);
+      // Report gene annotations are intentionally hidden for now.
+      // Keep linkview_gene_map/currentTrackGenes/addGeneBrackets for future re-enable.
+      // addGeneBrackets(svg, effectiveOrder, ranges);
       nudgeScaleBar(svg);
       requestAnimationFrame(() => {
         ensureDetailGutter(svg, effectiveOrder);
