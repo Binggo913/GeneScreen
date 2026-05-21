@@ -19,6 +19,11 @@ from datetime import datetime
 from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
+try:
+    from .multi_query_report_assets import LINKVIEW_SVG_HELPERS_JS
+except ImportError:
+    from multi_query_report_assets import LINKVIEW_SVG_HELPERS_JS
+
 
 def sanitize_path_segment(value: Any, fallback: str = "item") -> str:
     text = str(value or "").strip()
@@ -2891,6 +2896,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         .map(normalizeTrackToken)
         .filter(Boolean);
     }
+__LINKVIEW_SVG_HELPERS_JS__
     function inferSvgTrackOrder(svg, fallbackOrder) {
       const labels = Array.from(svg.querySelectorAll('text.label'))
         .map(label => ({ text: normalizeTrackToken(label.textContent), y: Number(label.getAttribute('y') || 0) }))
@@ -2911,7 +2917,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           used.add(matched);
         }
       }
-      const chroCount = svg.querySelectorAll('rect.chro').length;
+      const chroCount = visibleChroRects(svg).length;
       return inferred.length === chroCount ? inferred : fallbackOrder;
     }
     function makeTrackControls(order, svgHeight, topMargin) {
@@ -3019,7 +3025,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function featureTooltip(type, rect, ranges) {
       const bbox = rect.getBBox ? rect.getBBox() : null;
       const width = bbox ? Math.max(1, bbox.width) : 1;
-      const chro = rect.closest('svg') ? Array.from(rect.closest('svg').querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0)) : [];
+      const chro = rect.closest('svg') ? visibleChroRects(rect.closest('svg')) : [];
       const trackIndex = chro.findIndex(track => {
         const ty = Number(track.getAttribute('y') || 0);
         const th = Number(track.getAttribute('height') || 0);
@@ -3062,7 +3068,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (!canvas || !host || !overlay) return;
       host.style.paddingLeft = '0px';
       host.style.paddingRight = '0px';
-      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      const chros = visibleChroRects(svg);
       if (!chros.length) return;
       const controls = Array.from(overlay.querySelectorAll('.detail-track-control'));
       const requiredWidth = Math.max(0, ...controls.map(control => control.getBoundingClientRect().width || 220)) + 24;
@@ -3074,7 +3080,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const canvas = svg.closest('.detail-canvas');
       const overlay = canvas ? canvas.querySelector('.detail-track-overlays') : null;
       if (!canvas || !overlay) return;
-      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      const chros = visibleChroRects(svg);
       if (!chros.length) return;
       const svgRect = svg.getBoundingClientRect();
       const overlayRect = overlay.getBoundingClientRect();
@@ -3130,7 +3136,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const geneStart = Number(info.gene_rel_start || 0);
       const geneEnd = Number(info.gene_rel_end || 0);
       if (!geneStart || !geneEnd || !input.id) return;
-      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      const chros = visibleChroRects(svg);
       const rect = chros[refIndex];
       const row = ranges[refIndex];
       if (!rect || !row || !row.range) return;
@@ -3175,7 +3181,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       svg.querySelectorAll('text.label').forEach(label => label.remove());
       svg.querySelectorAll('.detail-track-end-label').forEach(label => label.remove());
       const ranges = currentTrackRanges(effectiveOrder);
-      const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
+      const chros = visibleChroRects(svg);
       chros.forEach((rect, index) => {
         const row = ranges[index];
         if (!row) return;
@@ -3444,4 +3450,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
 </body>
 </html>
 """
-    return template.replace("__TITLE__", title_html).replace("__EMBEDDED_DATA__", embedded)
+    return (
+        template
+        .replace("__TITLE__", title_html)
+        .replace("__EMBEDDED_DATA__", embedded)
+        .replace("__LINKVIEW_SVG_HELPERS_JS__", LINKVIEW_SVG_HELPERS_JS)
+    )
