@@ -18,27 +18,13 @@ from pathlib import Path
 import shutil
 
 from core import get_genome_manager, get_database
-
-TABLE_CHECKBOX_COLUMN_WIDTH = 52
-TABLE_CHECKBOX_SIZE = 22
-
-
-def _configure_table_checkbox(checkbox: QCheckBox) -> QCheckBox:
-    checkbox.setObjectName("tableCheckBox")
-    checkbox.setText("")
-    checkbox.setFixedSize(TABLE_CHECKBOX_SIZE, TABLE_CHECKBOX_SIZE)
-    checkbox.setFocusPolicy(Qt.NoFocus)
-    return checkbox
-
-
-def _make_table_checkbox_cell(checkbox: QCheckBox) -> QWidget:
-    checkbox_widget = QWidget()
-    checkbox_layout = QHBoxLayout(checkbox_widget)
-    checkbox_layout.addWidget(checkbox, 0, Qt.AlignCenter)
-    checkbox_layout.setAlignment(Qt.AlignCenter)
-    checkbox_layout.setContentsMargins(0, 0, 0, 0)
-    checkbox_layout.setSpacing(0)
-    return checkbox_widget
+from ui.widgets.table_checkbox import (
+    TABLE_CHECKBOX_ROW_MIN_HEIGHT,
+    configure_table_checkbox,
+    configure_table_checkbox_column,
+    make_table_checkbox_cell,
+    position_header_checkbox,
+)
 
 
 class NameEditDelegate(QStyledItemDelegate):
@@ -213,22 +199,18 @@ class GenomeManagerPage(QWidget):
         self.genome_table.verticalHeader().setVisible(False)
         
         header = self.genome_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        configure_table_checkbox_column(self.genome_table)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.Stretch)
-        self.genome_table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
         self.genome_table.setSelectionMode(QTableWidget.NoSelection)
         self.genome_table.setAlternatingRowColors(True)
         self.genome_table.setWordWrap(True)
         self.genome_table.setTextElideMode(Qt.ElideNone)
-        default_row_height = self.genome_table.verticalHeader().defaultSectionSize()
-        self.genome_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        self.genome_table.verticalHeader().setDefaultSectionSize(max(default_row_height, 36))
 
         self.genome_select_all = QCheckBox(self.genome_table.horizontalHeader())
-        _configure_table_checkbox(self.genome_select_all)
+        configure_table_checkbox(self.genome_select_all)
         self.genome_select_all.setTristate(False)
         self.genome_select_all.stateChanged.connect(self._toggle_genome_all)
         self._position_genome_header_checkbox()
@@ -291,19 +273,15 @@ class GenomeManagerPage(QWidget):
         self.search_table.setHorizontalHeaderLabels(["", "来源", "ID", "名称", "描述"])
         self.search_table.verticalHeader().setVisible(False)
         header = self.search_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Fixed)
+        configure_table_checkbox_column(self.search_table)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.Stretch)
         header.setSectionResizeMode(4, QHeaderView.Stretch)
-        self.search_table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
         self.search_table.setSelectionMode(QTableWidget.NoSelection)
         self.search_table.setAlternatingRowColors(True)
         self.search_table.setWordWrap(True)
         self.search_table.setTextElideMode(Qt.ElideNone)
-        default_row_height = self.search_table.verticalHeader().defaultSectionSize()
-        self.search_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        self.search_table.verticalHeader().setDefaultSectionSize(max(default_row_height, 36))
         layout.addWidget(self.search_table)
 
         self.search_status = QLabel("请输入关键词进行搜索", self.search_table)
@@ -313,7 +291,7 @@ class GenomeManagerPage(QWidget):
         self.search_table.resizeEvent = self._on_search_table_resize
 
         self.search_select_all = QCheckBox(self.search_table.horizontalHeader())
-        _configure_table_checkbox(self.search_select_all)
+        configure_table_checkbox(self.search_select_all)
         self.search_select_all.setTristate(False)
         self.search_select_all.stateChanged.connect(self._toggle_search_all)
         self._position_search_header_checkbox()
@@ -545,8 +523,8 @@ class GenomeManagerPage(QWidget):
         self.genome_table.setRowCount(len(genomes))
         
         for i, genome in enumerate(genomes):
-            checkbox = _configure_table_checkbox(QCheckBox())
-            checkbox_widget = _make_table_checkbox_cell(checkbox)
+            checkbox = configure_table_checkbox(QCheckBox())
+            checkbox_widget = make_table_checkbox_cell(checkbox)
             self.genome_table.setCellWidget(i, 0, checkbox_widget)
             checkbox.stateChanged.connect(self._update_genome_header_checkbox)
             
@@ -586,20 +564,15 @@ class GenomeManagerPage(QWidget):
             
             # 根据注释版本数调整行高
             if len(annotations) > 1:
-                self.genome_table.setRowHeight(i, 20 * len(annotations))
+                self.genome_table.setRowHeight(
+                    i, max(TABLE_CHECKBOX_ROW_MIN_HEIGHT, 20 * len(annotations))
+                )
         
         self.genome_table.blockSignals(False)
         self._update_genome_header_checkbox()
 
     def _position_genome_header_checkbox(self):
-        header = self.genome_table.horizontalHeader()
-        if not header:
-            return
-        x = header.sectionPosition(0)
-        w = header.sectionSize(0)
-        h = header.height()
-        size = TABLE_CHECKBOX_SIZE
-        self.genome_select_all.setGeometry(x + (w - size) // 2, (h - size) // 2, size, size)
+        position_header_checkbox(self.genome_table, self.genome_select_all)
 
     def _toggle_genome_all(self, state):
         checked = self.genome_select_all.isChecked()
@@ -995,8 +968,8 @@ class GenomeManagerPage(QWidget):
         self.search_status.hide()
         self.search_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
-            checkbox = _configure_table_checkbox(QCheckBox())
-            checkbox_widget = _make_table_checkbox_cell(checkbox)
+            checkbox = configure_table_checkbox(QCheckBox())
+            checkbox_widget = make_table_checkbox_cell(checkbox)
             self.search_table.setCellWidget(i, 0, checkbox_widget)
             checkbox.stateChanged.connect(self._update_search_header_checkbox)
 
@@ -1007,14 +980,7 @@ class GenomeManagerPage(QWidget):
 
 
     def _position_search_header_checkbox(self):
-        header = self.search_table.horizontalHeader()
-        if not header:
-            return
-        x = header.sectionPosition(0)
-        w = header.sectionSize(0)
-        h = header.height()
-        size = TABLE_CHECKBOX_SIZE
-        self.search_select_all.setGeometry(x + (w - size) // 2, (h - size) // 2, size, size)
+        position_header_checkbox(self.search_table, self.search_select_all)
 
     def _toggle_search_all(self, state):
         checked = self.search_select_all.isChecked()
