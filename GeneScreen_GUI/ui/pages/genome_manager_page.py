@@ -22,8 +22,10 @@ from ui.widgets.table_checkbox import (
     TABLE_CHECKBOX_ROW_MIN_HEIGHT,
     configure_table_checkbox_column,
     create_table_checkbox,
-    make_table_checkbox_cell,
+    is_table_checkbox_checked,
+    make_table_checkbox_item,
     position_header_checkbox,
+    set_table_checkbox_checked,
 )
 
 
@@ -281,6 +283,7 @@ class GenomeManagerPage(QWidget):
         self.search_table.setAlternatingRowColors(True)
         self.search_table.setWordWrap(True)
         self.search_table.setTextElideMode(Qt.ElideNone)
+        self.search_table.cellClicked.connect(self._on_search_cell_clicked)
         layout.addWidget(self.search_table)
 
         self.search_status = QLabel("请输入关键词进行搜索", self.search_table)
@@ -500,11 +503,21 @@ class GenomeManagerPage(QWidget):
     
     def _on_cell_clicked(self, row: int, column: int):
         if column == 0:
-            checkbox_widget = self.genome_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox:
-                    checkbox.setChecked(not checkbox.isChecked())
+            set_table_checkbox_checked(
+                self.genome_table,
+                row,
+                not is_table_checkbox_checked(self.genome_table, row),
+            )
+            self._update_genome_header_checkbox()
+
+    def _on_search_cell_clicked(self, row: int, column: int):
+        if column == 0:
+            set_table_checkbox_checked(
+                self.search_table,
+                row,
+                not is_table_checkbox_checked(self.search_table, row),
+            )
+            self._update_search_header_checkbox()
     
     def _on_item_changed(self, item: QTableWidgetItem):
         if item.column() == 1:
@@ -521,10 +534,7 @@ class GenomeManagerPage(QWidget):
         self.genome_table.setRowCount(len(genomes))
         
         for i, genome in enumerate(genomes):
-            checkbox = create_table_checkbox()
-            checkbox_widget = make_table_checkbox_cell(checkbox)
-            self.genome_table.setCellWidget(i, 0, checkbox_widget)
-            checkbox.stateChanged.connect(self._update_genome_header_checkbox)
+            self.genome_table.setItem(i, 0, make_table_checkbox_item(False))
             
             name_item = QTableWidgetItem(genome.get("display_name") or genome["name"])
             name_item.setData(Qt.UserRole, genome["name"])
@@ -575,13 +585,7 @@ class GenomeManagerPage(QWidget):
     def _toggle_genome_all(self, state):
         checked = self.genome_select_all.isChecked()
         for row in range(self.genome_table.rowCount()):
-            checkbox_widget = self.genome_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox:
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(checked)
-                    checkbox.blockSignals(False)
+            set_table_checkbox_checked(self.genome_table, row, checked)
         self._update_genome_header_checkbox()
 
     def _update_genome_header_checkbox(self):
@@ -592,9 +596,7 @@ class GenomeManagerPage(QWidget):
         checked = sum(
             1
             for row in range(total)
-            if (w := self.genome_table.cellWidget(row, 0))
-            and (cb := w.findChild(QCheckBox))
-            and cb.isChecked()
+            if is_table_checkbox_checked(self.genome_table, row)
         )
         self.genome_select_all.blockSignals(True)
         self.genome_select_all.setChecked(checked == total)
@@ -675,13 +677,10 @@ class GenomeManagerPage(QWidget):
     def _get_selected_names(self) -> list:
         selected_names = []
         for row in range(self.genome_table.rowCount()):
-            checkbox_widget = self.genome_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox and checkbox.isChecked():
-                    name_item = self.genome_table.item(row, 1)
-                    if name_item:
-                        selected_names.append(name_item.data(Qt.UserRole))
+            if is_table_checkbox_checked(self.genome_table, row):
+                name_item = self.genome_table.item(row, 1)
+                if name_item:
+                    selected_names.append(name_item.data(Qt.UserRole))
         return selected_names
 
     def _delete_genome_files(self, genome: dict, cache_dir: Path) -> bool:
@@ -966,10 +965,7 @@ class GenomeManagerPage(QWidget):
         self.search_status.hide()
         self.search_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
-            checkbox = create_table_checkbox()
-            checkbox_widget = make_table_checkbox_cell(checkbox)
-            self.search_table.setCellWidget(i, 0, checkbox_widget)
-            checkbox.stateChanged.connect(self._update_search_header_checkbox)
+            self.search_table.setItem(i, 0, make_table_checkbox_item(False))
 
             for col, key in enumerate(["source", "id", "name", "desc"], 1):
                 item = QTableWidgetItem(row[key])
@@ -983,20 +979,19 @@ class GenomeManagerPage(QWidget):
     def _toggle_search_all(self, state):
         checked = self.search_select_all.isChecked()
         for row in range(self.search_table.rowCount()):
-            checkbox_widget = self.search_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox:
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(checked)
-                    checkbox.blockSignals(False)
+            set_table_checkbox_checked(self.search_table, row, checked)
+        self._update_search_header_checkbox()
 
     def _update_search_header_checkbox(self):
         total = self.search_table.rowCount()
         if total == 0:
             self.search_select_all.setChecked(False)
             return
-        checked = sum(1 for row in range(total) if (w := self.search_table.cellWidget(row, 0)) and (cb := w.findChild(QCheckBox)) and cb.isChecked())
+        checked = sum(
+            1
+            for row in range(total)
+            if is_table_checkbox_checked(self.search_table, row)
+        )
         self.search_select_all.blockSignals(True)
         self.search_select_all.setChecked(checked == total)
         self.search_select_all.blockSignals(False)
@@ -1004,13 +999,10 @@ class GenomeManagerPage(QWidget):
     def _download_selected_genomes(self):
         selected = []
         for row in range(self.search_table.rowCount()):
-            checkbox_widget = self.search_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox and checkbox.isChecked():
-                    genome_id = self.search_table.item(row, 2).text()
-                    genome_name = self.search_table.item(row, 3).text()
-                    selected.append({"id": genome_id, "name": genome_name})
+            if is_table_checkbox_checked(self.search_table, row):
+                genome_id = self.search_table.item(row, 2).text()
+                genome_name = self.search_table.item(row, 3).text()
+                selected.append({"id": genome_id, "name": genome_name})
         
         if not selected:
             QMessageBox.warning(self, "提示", "请先勾选要下载的基因组")

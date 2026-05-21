@@ -22,8 +22,10 @@ from ui.utils.icon_utils import draw_sidebar_icon
 from ui.widgets.table_checkbox import (
     configure_table_checkbox_column,
     create_table_checkbox,
-    make_table_checkbox_cell,
+    is_table_checkbox_checked,
+    make_table_checkbox_item,
     position_header_checkbox,
+    set_table_checkbox_checked,
 )
 
 
@@ -121,21 +123,10 @@ class HistoryPage(QWidget):
         except ValueError:
             return created_at[:19]
 
-    def _make_checkbox_cell(self, checked: bool = False):
-        checkbox = create_table_checkbox()
-        checkbox.setChecked(checked)
-        checkbox.stateChanged.connect(self._update_history_header_checkbox)
-        checkbox_widget = make_table_checkbox_cell(checkbox)
-        return checkbox_widget, checkbox
-
     def _get_checked_record_ids(self):
         checked_ids = []
         for row in range(self.history_table.rowCount()):
-            checkbox_widget = self.history_table.cellWidget(row, 0)
-            if not checkbox_widget:
-                continue
-            checkbox = checkbox_widget.findChild(QCheckBox)
-            if checkbox and checkbox.isChecked():
+            if is_table_checkbox_checked(self.history_table, row):
                 record = self.history_table.item(row, 1).data(Qt.UserRole)
                 if record:
                     checked_ids.append(record.get("id"))
@@ -147,13 +138,7 @@ class HistoryPage(QWidget):
     def _toggle_history_all(self, state):
         checked = self.history_select_all.isChecked()
         for row in range(self.history_table.rowCount()):
-            checkbox_widget = self.history_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox:
-                    checkbox.blockSignals(True)
-                    checkbox.setChecked(checked)
-                    checkbox.blockSignals(False)
+            set_table_checkbox_checked(self.history_table, row, checked)
         self._update_history_header_checkbox()
 
     def _update_history_header_checkbox(self):
@@ -164,9 +149,7 @@ class HistoryPage(QWidget):
         checked = sum(
             1
             for row in range(total)
-            if (w := self.history_table.cellWidget(row, 0))
-            and (cb := w.findChild(QCheckBox))
-            and cb.isChecked()
+            if is_table_checkbox_checked(self.history_table, row)
         )
         self.history_select_all.blockSignals(True)
         self.history_select_all.setChecked(checked == total)
@@ -185,10 +168,11 @@ class HistoryPage(QWidget):
         self.history_table.setRowCount(len(history))
         
         for i, record in enumerate(history):
-            checkbox_widget, checkbox = self._make_checkbox_cell(
-                record.get("id") in checked_ids
+            self.history_table.setItem(
+                i,
+                0,
+                make_table_checkbox_item(record.get("id") in checked_ids),
             )
-            self.history_table.setCellWidget(i, 0, checkbox_widget)
 
             mode = record.get("mode", "")
             display_id = record.get("input_value") or str(record.get("id", ""))
@@ -273,11 +257,12 @@ class HistoryPage(QWidget):
 
     def _on_cell_clicked(self, row: int, column: int):
         if column == 0:
-            checkbox_widget = self.history_table.cellWidget(row, 0)
-            if checkbox_widget:
-                checkbox = checkbox_widget.findChild(QCheckBox)
-                if checkbox:
-                    checkbox.setChecked(not checkbox.isChecked())
+            set_table_checkbox_checked(
+                self.history_table,
+                row,
+                not is_table_checkbox_checked(self.history_table, row),
+            )
+            self._update_history_header_checkbox()
             return
         if column in (5, 6):
             self._open_result(row, column)
@@ -393,11 +378,7 @@ class HistoryPage(QWidget):
     def _get_checked_records(self):
         records = []
         for row in range(self.history_table.rowCount()):
-            checkbox_widget = self.history_table.cellWidget(row, 0)
-            if not checkbox_widget:
-                continue
-            checkbox = checkbox_widget.findChild(QCheckBox)
-            if checkbox and checkbox.isChecked():
+            if is_table_checkbox_checked(self.history_table, row):
                 record = self.history_table.item(row, 1).data(Qt.UserRole)
                 if record:
                     records.append(record)

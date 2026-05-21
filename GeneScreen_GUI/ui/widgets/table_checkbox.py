@@ -6,10 +6,13 @@ from PySide6.QtCore import QPoint, QPointF, Qt, QRect, QRectF, QSize
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import (
     QCheckBox,
-    QGridLayout,
+    QApplication,
     QHeaderView,
-    QSizePolicy,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
+    QTableWidgetItem,
     QWidget,
 )
 
@@ -18,6 +21,82 @@ TABLE_CHECKBOX_COLUMN_WIDTH = 52
 TABLE_CHECKBOX_SIZE = 28
 TABLE_CHECKBOX_ROW_MIN_HEIGHT = 40
 TABLE_CHECKBOX_INDICATOR_SIZE = 18
+TABLE_CHECKBOX_CHECKED_ROLE = Qt.UserRole
+
+
+def _draw_checkbox_indicator(
+    painter: QPainter,
+    indicator_rect: QRect,
+    palette,
+    checked: bool,
+    partially_checked: bool = False,
+    enabled: bool = True,
+    hovered: bool = False,
+) -> None:
+    if checked or partially_checked:
+        fill_color = palette.highlight().color()
+        border_color = palette.highlight().color()
+    else:
+        fill_color = palette.base().color() if enabled else palette.button().color()
+        border_color = palette.highlight().color() if enabled and hovered else palette.mid().color()
+
+    rect = QRectF(indicator_rect).adjusted(0.5, 0.5, -0.5, -0.5)
+    painter.setPen(QPen(border_color, 1))
+    painter.setBrush(fill_color)
+    painter.drawRoundedRect(rect, 4, 4)
+
+    if checked:
+        pen = QPen(palette.highlightedText().color(), 2)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        painter.setPen(pen)
+        painter.drawLine(
+            QPointF(rect.left() + 4, rect.center().y() + 1),
+            QPointF(rect.left() + 7, rect.bottom() - 4),
+        )
+        painter.drawLine(
+            QPointF(rect.left() + 7, rect.bottom() - 4),
+            QPointF(rect.right() - 4, rect.top() + 5),
+        )
+    elif partially_checked:
+        pen = QPen(palette.highlightedText().color(), 2)
+        pen.setCapStyle(Qt.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(
+            QPointF(rect.left() + 4, rect.center().y()),
+            QPointF(rect.right() - 4, rect.center().y()),
+        )
+
+
+class TableCheckBoxDelegate(QStyledItemDelegate):
+    """Paint table checkbox items centered in the real cell rectangle."""
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index):
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+
+        painter.save()
+        app = QApplication.instance()
+        style = opt.widget.style() if opt.widget else app.style() if app else None
+        if style:
+            style.drawPrimitive(QStyle.PE_PanelItemViewItem, opt, painter, opt.widget)
+
+        indicator_rect = QRect(
+            QPoint(0, 0),
+            QSize(TABLE_CHECKBOX_INDICATOR_SIZE, TABLE_CHECKBOX_INDICATOR_SIZE),
+        )
+        indicator_rect.moveCenter(opt.rect.center())
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        _draw_checkbox_indicator(
+            painter,
+            indicator_rect,
+            opt.palette,
+            bool(index.data(TABLE_CHECKBOX_CHECKED_ROLE)),
+            enabled=bool(opt.state & QStyle.State_Enabled),
+            hovered=bool(opt.state & QStyle.State_MouseOver),
+        )
+        painter.restore()
 
 
 class CenteredTableCheckBox(QCheckBox):
@@ -45,45 +124,15 @@ class CenteredTableCheckBox(QCheckBox):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing, True)
 
-        palette = self.palette()
-        checked = self.isChecked()
-        partially_checked = self.checkState() == Qt.CheckState.PartiallyChecked
-        enabled = self.isEnabled()
-        hovered = self.underMouse()
-
-        if checked or partially_checked:
-            fill_color = palette.highlight().color()
-            border_color = palette.highlight().color()
-        else:
-            fill_color = palette.base().color() if enabled else palette.button().color()
-            border_color = palette.highlight().color() if enabled and hovered else palette.mid().color()
-
-        rect = QRectF(indicator_rect).adjusted(0.5, 0.5, -0.5, -0.5)
-        painter.setPen(QPen(border_color, 1))
-        painter.setBrush(fill_color)
-        painter.drawRoundedRect(rect, 4, 4)
-
-        if checked:
-            pen = QPen(palette.highlightedText().color(), 2)
-            pen.setCapStyle(Qt.RoundCap)
-            pen.setJoinStyle(Qt.RoundJoin)
-            painter.setPen(pen)
-            painter.drawLine(
-                QPointF(rect.left() + 4, rect.center().y() + 1),
-                QPointF(rect.left() + 7, rect.bottom() - 4),
-            )
-            painter.drawLine(
-                QPointF(rect.left() + 7, rect.bottom() - 4),
-                QPointF(rect.right() - 4, rect.top() + 5),
-            )
-        elif partially_checked:
-            pen = QPen(palette.highlightedText().color(), 2)
-            pen.setCapStyle(Qt.RoundCap)
-            painter.setPen(pen)
-            painter.drawLine(
-                QPointF(rect.left() + 4, rect.center().y()),
-                QPointF(rect.right() - 4, rect.center().y()),
-            )
+        _draw_checkbox_indicator(
+            painter,
+            indicator_rect,
+            self.palette(),
+            self.isChecked(),
+            partially_checked=self.checkState() == Qt.CheckState.PartiallyChecked,
+            enabled=self.isEnabled(),
+            hovered=self.underMouse(),
+        )
 
     def hitButton(self, pos):
         return self.rect().contains(pos)
@@ -95,19 +144,6 @@ class CenteredTableCheckBox(QCheckBox):
     def leaveEvent(self, event):
         super().leaveEvent(event)
         self.update()
-
-
-class TableCheckBoxCell(QWidget):
-    def __init__(self, checkbox: QCheckBox, parent: Optional[QWidget] = None):
-        super().__init__(parent)
-        self.checkbox = checkbox
-        self.setObjectName("tableCheckBoxCell")
-        self.setMinimumHeight(TABLE_CHECKBOX_ROW_MIN_HEIGHT)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        layout = QGridLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
-        layout.addWidget(self.checkbox, 0, 0, Qt.AlignCenter)
 
 
 def configure_table_checkbox(checkbox: QCheckBox) -> QCheckBox:
@@ -123,8 +159,25 @@ def create_table_checkbox(parent: Optional[QWidget] = None) -> QCheckBox:
     return configure_table_checkbox(CenteredTableCheckBox(parent))
 
 
-def make_table_checkbox_cell(checkbox: QCheckBox) -> QWidget:
-    return TableCheckBoxCell(checkbox)
+def make_table_checkbox_item(checked: bool = False) -> QTableWidgetItem:
+    item = QTableWidgetItem("")
+    item.setData(TABLE_CHECKBOX_CHECKED_ROLE, bool(checked))
+    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+    return item
+
+
+def is_table_checkbox_checked(table: QTableWidget, row: int) -> bool:
+    item = table.item(row, 0)
+    return bool(item and item.data(TABLE_CHECKBOX_CHECKED_ROLE))
+
+
+def set_table_checkbox_checked(table: QTableWidget, row: int, checked: bool) -> None:
+    item = table.item(row, 0)
+    if not item:
+        item = make_table_checkbox_item(False)
+        table.setItem(row, 0, item)
+    item.setData(TABLE_CHECKBOX_CHECKED_ROLE, bool(checked))
+    table.viewport().update(table.visualItemRect(item))
 
 
 def configure_table_checkbox_column(table: QTableWidget) -> None:
@@ -132,6 +185,7 @@ def configure_table_checkbox_column(table: QTableWidget) -> None:
     header.setSectionResizeMode(0, QHeaderView.Fixed)
     header.setMinimumHeight(max(header.minimumHeight(), TABLE_CHECKBOX_SIZE + 8))
     table.setColumnWidth(0, TABLE_CHECKBOX_COLUMN_WIDTH)
+    table.setItemDelegateForColumn(0, TableCheckBoxDelegate(table))
     vertical_header = table.verticalHeader()
     vertical_header.setSectionResizeMode(QHeaderView.Fixed)
     vertical_header.setDefaultSectionSize(

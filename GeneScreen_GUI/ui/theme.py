@@ -418,10 +418,6 @@ QCheckBox#tableCheckBox::indicator {
     margin: 0px;
 }
 
-QWidget#tableCheckBoxCell {
-    background: transparent;
-}
-
 QTabWidget::pane {
     background: palette(base);
     border: 1px solid palette(dark);
