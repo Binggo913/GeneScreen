@@ -260,19 +260,20 @@ QCheckBox::indicator:disabled {
 }
 
 QCheckBox#tableCheckBox {
-    min-width: 22px;
-    max-width: 22px;
-    min-height: 22px;
-    max-height: 22px;
+    min-width: 28px;
+    max-width: 28px;
+    min-height: 28px;
+    max-height: 28px;
     spacing: 0px;
     padding: 0px;
     margin: 0px;
+    background: transparent;
 }
 
 QCheckBox#tableCheckBox::indicator {
     width: 18px;
     height: 18px;
-    margin: 2px;
+    margin: 0px;
 }
 
 QCheckBox#tableCheckBox::indicator:checked {
