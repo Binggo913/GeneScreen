@@ -415,7 +415,7 @@ QCheckBox#tableCheckBox {
 QCheckBox#tableCheckBox::indicator {
     width: 18px;
     height: 18px;
-    margin: 5px;
+    margin: 0px;
 }
 
 QWidget#tableCheckBoxCell {

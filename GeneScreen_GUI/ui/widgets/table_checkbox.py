@@ -2,13 +2,40 @@
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QHeaderView, QSizePolicy, QTableWidget, QWidget
+from PySide6.QtCore import QPoint, Qt, QRect, QSize
+from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QHeaderView,
+    QSizePolicy,
+    QStyle,
+    QStyleOptionButton,
+    QTableWidget,
+    QWidget,
+)
 
 
 TABLE_CHECKBOX_COLUMN_WIDTH = 52
 TABLE_CHECKBOX_SIZE = 28
 TABLE_CHECKBOX_ROW_MIN_HEIGHT = 40
+TABLE_CHECKBOX_INDICATOR_SIZE = 18
+
+
+class CenteredTableCheckBox(QCheckBox):
+    """QCheckBox variant that paints its indicator at the exact widget center."""
+
+    def paintEvent(self, event):
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator_rect = QRect(QPoint(0, 0), QSize(TABLE_CHECKBOX_INDICATOR_SIZE, TABLE_CHECKBOX_INDICATOR_SIZE))
+        indicator_rect.moveCenter(self.rect().center())
+        option.rect = indicator_rect
+
+        painter = QPainter(self)
+        self.style().drawPrimitive(QStyle.PE_IndicatorCheckBox, option, painter, self)
+
+    def hitButton(self, pos):
+        return self.rect().contains(pos)
 
 
 class TableCheckBoxCell(QWidget):
@@ -39,6 +66,10 @@ def configure_table_checkbox(checkbox: QCheckBox) -> QCheckBox:
     checkbox.setFocusPolicy(Qt.NoFocus)
     checkbox.setCursor(Qt.PointingHandCursor)
     return checkbox
+
+
+def create_table_checkbox(parent: Optional[QWidget] = None) -> QCheckBox:
+    return configure_table_checkbox(CenteredTableCheckBox(parent))
 
 
 def make_table_checkbox_cell(checkbox: QCheckBox) -> QWidget:

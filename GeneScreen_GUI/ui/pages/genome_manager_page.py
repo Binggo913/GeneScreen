@@ -20,8 +20,8 @@ import shutil
 from core import get_genome_manager, get_database
 from ui.widgets.table_checkbox import (
     TABLE_CHECKBOX_ROW_MIN_HEIGHT,
-    configure_table_checkbox,
     configure_table_checkbox_column,
+    create_table_checkbox,
     make_table_checkbox_cell,
     position_header_checkbox,
 )
@@ -209,8 +209,7 @@ class GenomeManagerPage(QWidget):
         self.genome_table.setWordWrap(True)
         self.genome_table.setTextElideMode(Qt.ElideNone)
 
-        self.genome_select_all = QCheckBox(self.genome_table.horizontalHeader())
-        configure_table_checkbox(self.genome_select_all)
+        self.genome_select_all = create_table_checkbox(self.genome_table.horizontalHeader())
         self.genome_select_all.setTristate(False)
         self.genome_select_all.stateChanged.connect(self._toggle_genome_all)
         self._position_genome_header_checkbox()
@@ -290,8 +289,7 @@ class GenomeManagerPage(QWidget):
         self.search_status.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.search_table.resizeEvent = self._on_search_table_resize
 
-        self.search_select_all = QCheckBox(self.search_table.horizontalHeader())
-        configure_table_checkbox(self.search_select_all)
+        self.search_select_all = create_table_checkbox(self.search_table.horizontalHeader())
         self.search_select_all.setTristate(False)
         self.search_select_all.stateChanged.connect(self._toggle_search_all)
         self._position_search_header_checkbox()
@@ -523,7 +521,7 @@ class GenomeManagerPage(QWidget):
         self.genome_table.setRowCount(len(genomes))
         
         for i, genome in enumerate(genomes):
-            checkbox = configure_table_checkbox(QCheckBox())
+            checkbox = create_table_checkbox()
             checkbox_widget = make_table_checkbox_cell(checkbox)
             self.genome_table.setCellWidget(i, 0, checkbox_widget)
             checkbox.stateChanged.connect(self._update_genome_header_checkbox)
@@ -968,7 +966,7 @@ class GenomeManagerPage(QWidget):
         self.search_status.hide()
         self.search_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
-            checkbox = configure_table_checkbox(QCheckBox())
+            checkbox = create_table_checkbox()
             checkbox_widget = make_table_checkbox_cell(checkbox)
             self.search_table.setCellWidget(i, 0, checkbox_widget)
             checkbox.stateChanged.connect(self._update_search_header_checkbox)

@@ -20,8 +20,8 @@ from core import get_database
 from core.config import get_output_dir
 from ui.utils.icon_utils import draw_sidebar_icon
 from ui.widgets.table_checkbox import (
-    configure_table_checkbox,
     configure_table_checkbox_column,
+    create_table_checkbox,
     make_table_checkbox_cell,
     position_header_checkbox,
 )
@@ -97,8 +97,7 @@ class HistoryPage(QWidget):
         panel_layout.addWidget(self.history_table)
         layout.addWidget(panel)
 
-        self.history_select_all = QCheckBox(self.history_table.horizontalHeader())
-        configure_table_checkbox(self.history_select_all)
+        self.history_select_all = create_table_checkbox(self.history_table.horizontalHeader())
         self.history_select_all.setTristate(False)
         self.history_select_all.stateChanged.connect(self._toggle_history_all)
         header = self.history_table.horizontalHeader()
@@ -123,7 +122,7 @@ class HistoryPage(QWidget):
             return created_at[:19]
 
     def _make_checkbox_cell(self, checked: bool = False):
-        checkbox = configure_table_checkbox(QCheckBox())
+        checkbox = create_table_checkbox()
         checkbox.setChecked(checked)
         checkbox.stateChanged.connect(self._update_history_header_checkbox)
         checkbox_widget = make_table_checkbox_cell(checkbox)
