@@ -1957,6 +1957,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       inset: 8px 0;
       pointer-events: none;
     }
+    .detail-canvas.drag-active .detail-track-overlays {
+      pointer-events: auto;
+    }
     .detail-linkview-img,
     .detail-linkview-svg svg {
       display: block;
@@ -2369,7 +2372,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       window.addEventListener('resize', () => {
         clearTimeout(resizeAlignTimer);
         resizeAlignTimer = setTimeout(() => {
-          const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+          const order = resolvedLinkviewOrder(state.order.length ? state.order.slice() : ['ref'].concat(queryIds()));
           document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => {
             ensureDetailGutter(svg, order);
             requestAnimationFrame(() => alignTrackControls(svg, order));
@@ -2610,7 +2613,43 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderDetail();
       syncOpenZoomModal();
     }
+    function nearestTrackControl(root, clientY) {
+      const rows = Array.from(root.querySelectorAll('.detail-track-control'));
+      if (!rows.length) return null;
+      return rows
+        .map(row => {
+          const rect = row.getBoundingClientRect();
+          const center = rect.top + rect.height / 2;
+          return { row, rect, distance: Math.abs(clientY - center), placement: clientY > center ? 'after' : 'before' };
+        })
+        .sort((a, b) => a.distance - b.distance)[0];
+    }
+    function markNearestDrop(root, event) {
+      const nearest = nearestTrackControl(root, event.clientY);
+      clearDropHints(root);
+      if (!nearest) return null;
+      nearest.row.classList.add(nearest.placement === 'after' ? 'drop-after' : 'drop-before');
+      return nearest;
+    }
     function wireDetailTrackControls(root = document) {
+      const overlay = root.querySelector('.detail-track-overlays') || root;
+      if (!overlay.dataset.dropWired) {
+        overlay.dataset.dropWired = '1';
+        overlay.addEventListener('dragover', e => {
+          e.preventDefault();
+          markNearestDrop(root, e);
+        });
+        overlay.addEventListener('dragleave', e => {
+          if (!overlay.contains(e.relatedTarget)) clearDropHints(root);
+        });
+        overlay.addEventListener('drop', e => {
+          e.preventDefault();
+          const dragged = e.dataTransfer.getData('text/plain');
+          const nearest = markNearestDrop(root, e);
+          clearDropHints(root);
+          if (nearest) applyTrackDrop(dragged, nearest.row.dataset.trackId, nearest.placement);
+        });
+      }
       root.querySelectorAll('.detail-track-control').forEach(row => {
         row.draggable = true;
         row.addEventListener('dragstart', e => {
@@ -2619,18 +2658,19 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
             return;
           }
           row.classList.add('dragging');
+          const canvas = row.closest('.detail-canvas');
+          if (canvas) canvas.classList.add('drag-active');
           e.dataTransfer.setData('text/plain', row.dataset.trackId);
         });
         row.addEventListener('dragend', () => {
           row.classList.remove('dragging');
+          const canvas = row.closest('.detail-canvas');
+          if (canvas) canvas.classList.remove('drag-active');
           clearDropHints(root);
         });
         row.addEventListener('dragover', e => {
           e.preventDefault();
-          const rect = row.getBoundingClientRect();
-          const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
-          clearDropHints(root);
-          row.classList.add(placement === 'after' ? 'drop-after' : 'drop-before');
+          markNearestDrop(root, e);
         });
         row.addEventListener('dragleave', e => {
           if (!row.contains(e.relatedTarget)) row.classList.remove('drop-before', 'drop-after');
@@ -2638,11 +2678,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         row.addEventListener('drop', e => {
           e.preventDefault();
           const dragged = e.dataTransfer.getData('text/plain');
-          const target = row.dataset.trackId;
-          const rect = row.getBoundingClientRect();
-          const placement = e.clientY > rect.top + rect.height / 2 ? 'after' : 'before';
+          const nearest = markNearestDrop(root, e) || { row, placement: 'before' };
           clearDropHints(root);
-          applyTrackDrop(dragged, target, placement);
+          applyTrackDrop(dragged, nearest.row.dataset.trackId, nearest.placement);
         });
         const select = row.querySelector('select');
         if (select) {
@@ -2684,6 +2722,18 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function detailOrderKey(order) {
       return order.join('||');
+    }
+    function resolvedLinkviewOrder(order) {
+      const detail = reportData.detail || {};
+      const viewMap = detail.linkview_svg_inline_map || detail.linkview_svg_map || {};
+      const selectedViews = viewMap[detailSelectionKey()];
+      if (!selectedViews) return order;
+      const requestedKey = detailOrderKey(order);
+      if (selectedViews[requestedKey]) return order;
+      const defaultKey = detail.linkview_default_order_key;
+      if (defaultKey && selectedViews[defaultKey]) return defaultKey.split('||').filter(Boolean);
+      const firstKey = Object.keys(selectedViews)[0];
+      return firstKey ? firstKey.split('||').filter(Boolean) : order;
     }
     function resolveLinkviewSvg(order) {
       const detail = reportData.detail || {};
@@ -2729,6 +2779,40 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         return { trackId, range: ranges[trackId] || fallback || { start: 1, end: 1 } };
       });
     }
+    function normalizeTrackToken(value) {
+      return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+    function matchTokensForTrack(trackId) {
+      const detail = reportData.detail || {};
+      const aliases = detail.linkview_track_aliases || {};
+      const track = trackById(trackId);
+      return [trackId, aliases[trackId], track.name, track.sequence_id, track.genome_id]
+        .map(normalizeTrackToken)
+        .filter(Boolean);
+    }
+    function inferSvgTrackOrder(svg, fallbackOrder) {
+      const labels = Array.from(svg.querySelectorAll('text.label'))
+        .map(label => ({ text: normalizeTrackToken(label.textContent), y: Number(label.getAttribute('y') || 0) }))
+        .filter(item => item.text)
+        .sort((a, b) => a.y - b.y);
+      if (!labels.length) return fallbackOrder;
+      const allIds = (reportData.tracks || []).map(track => track.track_id);
+      const candidates = fallbackOrder.concat(allIds.filter(id => !fallbackOrder.includes(id)));
+      const used = new Set();
+      const inferred = [];
+      for (const label of labels) {
+        const matched = candidates.find(trackId => {
+          if (used.has(trackId)) return false;
+          return matchTokensForTrack(trackId).some(token => token && (label.text.includes(token) || token.includes(label.text)));
+        });
+        if (matched) {
+          inferred.push(matched);
+          used.add(matched);
+        }
+      }
+      const chroCount = svg.querySelectorAll('rect.chro').length;
+      return inferred.length === chroCount ? inferred : fallbackOrder;
+    }
     function makeTrackControls(order, svgHeight, topMargin) {
       const displayHeight = Math.max(1, svgHeight + topMargin);
       return order.map((trackId, index) => {
@@ -2745,6 +2829,18 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           .join('');
         return `<div class="detail-track-control" data-track-id="${esc(trackId)}" title="${trackTitle}" style="left:10px; top:${topPct}%; width:220px; transform:translateY(-50%);">${handle}<span class="detail-track-name">${trackTitle}</span><select class="detail-track-select" title="${t('candidateSwitch')}">${options}</select></div>`;
       }).join('');
+    }
+    function syncTrackOverlay(svg, order) {
+      const canvas = svg.closest('.detail-canvas');
+      const overlay = canvas ? canvas.querySelector('.detail-track-overlays') : null;
+      if (!canvas || !overlay) return;
+      const currentOrder = Array.from(overlay.querySelectorAll('.detail-track-control')).map(row => row.dataset.trackId).join('||');
+      const nextOrder = detailOrderKey(order);
+      if (currentOrder === nextOrder) return;
+      const detail = reportData.detail || {};
+      const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
+      overlay.innerHTML = makeTrackControls(order, Number(layout.svg_height || 400), Number(layout.top_margin || 0));
+      wireDetailTrackControls(canvas);
     }
     function showSvgTooltip(content, event, tooltip) {
       tooltip.innerHTML = content;
@@ -2970,12 +3066,14 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function enhanceLinkviewSvg(svg, order, tooltip) {
       if (!svg) return;
+      const effectiveOrder = inferSvgTrackOrder(svg, order);
+      syncTrackOverlay(svg, effectiveOrder);
       svg.classList.add('detail-linkview-svg-root');
       svg.setAttribute('width', '100%');
       svg.style.overflow = 'visible';
       svg.querySelectorAll('text.label').forEach(label => label.remove());
       svg.querySelectorAll('.detail-track-end-label').forEach(label => label.remove());
-      const ranges = currentTrackRanges(order);
+      const ranges = currentTrackRanges(effectiveOrder);
       const chros = Array.from(svg.querySelectorAll('rect.chro')).sort((a, b) => Number(a.getAttribute('y') || 0) - Number(b.getAttribute('y') || 0));
       chros.forEach((rect, index) => {
         const row = ranges[index];
@@ -2995,13 +3093,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           svg.appendChild(text);
         });
       });
-      addGeneBracket(svg, order, ranges);
+      addGeneBracket(svg, effectiveOrder, ranges);
       nudgeScaleBar(svg);
       requestAnimationFrame(() => {
-        ensureDetailGutter(svg, order);
-        requestAnimationFrame(() => alignTrackControls(svg, order));
+        ensureDetailGutter(svg, effectiveOrder);
+        requestAnimationFrame(() => alignTrackControls(svg, effectiveOrder));
       });
-      const markers = resolveLinkviewMarkers(order);
+      const markers = resolveLinkviewMarkers(effectiveOrder);
       allMarkerRects(svg).forEach((rect, index) => {
         const meta = markers[index] || {};
         rect.dataset.variantId = meta.variant_id || '';
@@ -3050,7 +3148,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const modal = document.getElementById('zoom-modal');
       const body = document.getElementById('zoom-modal-body');
       if (!modal || !body) return false;
-      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const requestedOrder = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const order = resolvedLinkviewOrder(requestedOrder);
       const detail = reportData.detail || {};
       const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
       const svgHeight = Number(layout.svg_height || 400);
@@ -3090,7 +3189,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     }
     function renderLinkviewDetail() {
       const root = document.getElementById('detail');
-      const order = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const requestedOrder = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
+      const order = resolvedLinkviewOrder(requestedOrder);
       const svgPath = resolveLinkviewSvg(order);
       if (!svgPath) {
         renderVectorDetail();
