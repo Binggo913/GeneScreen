@@ -2416,7 +2416,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     let reportData = JSON.parse(document.getElementById('embedded-report-data').textContent);
     fetch('data.json').then(r => r.ok ? r.json() : reportData).then(data => { reportData = data; init(); }).catch(init);
 
-    const state = { selected: {}, order: [] };
+    const state = {
+      selected: {},
+      order: [],
+      legendVisibility: { snp: true, indel: true, utr5: true, utr3: true, cds: true }
+    };
     let detailRenderToken = 0;
     let currentLang = 'zh';
     let resizeAlignTimer = null;
@@ -3038,10 +3042,16 @@ __LINKVIEW_SVG_HELPERS_JS__
     }
     function markerRects(svg, type) {
       const color = type === 'snp' ? 'orange' : 'blue';
-      return Array.from(svg.querySelectorAll(`rect[fill="${color}"]`));
+      return Array.from(svg.querySelectorAll(`rect[fill="${color}"]`))
+        .filter(rect => !rect.classList.contains('legend-icon'))
+        .filter(rect => !rect.classList.contains('legend-hitarea'))
+        .filter(rect => !isSvgDefinitionElement(rect));
     }
     function allMarkerRects(svg) {
-      return Array.from(svg.querySelectorAll('rect[fill="orange"], rect[fill="blue"]'));
+      return Array.from(svg.querySelectorAll('rect[fill="orange"], rect[fill="blue"]'))
+        .filter(rect => !rect.classList.contains('legend-icon'))
+        .filter(rect => !rect.classList.contains('legend-hitarea'))
+        .filter(rect => !isSvgDefinitionElement(rect));
     }
     function centerOfRect(rect) {
       return {
@@ -3051,6 +3061,30 @@ __LINKVIEW_SVG_HELPERS_JS__
     }
     function removeHoverLines(svg) {
       svg.querySelectorAll('.variant-hover-line').forEach(line => line.remove());
+    }
+    function legendElements(svg, type) {
+      if (type === 'snp') return Array.from(svg.querySelectorAll('.variant-snp'));
+      if (type === 'indel') return Array.from(svg.querySelectorAll('.variant-indel'));
+      if (type === 'utr5') return Array.from(svg.querySelectorAll('.UTR5'));
+      if (type === 'utr3') return Array.from(svg.querySelectorAll('.UTR3'));
+      if (type === 'cds') return Array.from(svg.querySelectorAll('.exon'));
+      return [];
+    }
+    function applyLegendVisibility(svg) {
+      if (!svg) return;
+      svg.querySelectorAll('.legend-item').forEach(item => {
+        const type = item.getAttribute('data-type');
+        if (!type || !(type in state.legendVisibility)) return;
+        const visible = state.legendVisibility[type] !== false;
+        item.classList.toggle('disabled', !visible);
+        const checkmark = item.querySelector('.legend-checkmark');
+        if (checkmark) checkmark.style.display = visible ? '' : 'none';
+        legendElements(svg, type).forEach(el => { el.style.display = visible ? '' : 'none'; });
+        if (!visible && (type === 'snp' || type === 'indel')) removeHoverLines(svg);
+      });
+    }
+    function applyLegendVisibilityToAll() {
+      document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => applyLegendVisibility(svg));
     }
     function drawHoverLines(svg, rect, type) {
       removeHoverLines(svg);
@@ -3263,7 +3297,8 @@ __LINKVIEW_SVG_HELPERS_JS__
         const y = Number(rect.getAttribute('y') || 0);
         const width = Number(rect.getAttribute('width') || 0);
         const height = Number(rect.getAttribute('height') || 0);
-        const labelY = y + height + 17;
+        const isBottomTrack = index === chros.length - 1;
+        const labelY = isBottomTrack ? y - 6 : y + height + 17;
         [['start', x + 2, 'start'], ['end', x + width - 2, 'end']].forEach(([kind, labelX, anchor]) => {
           const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
           text.setAttribute('x', labelX);
@@ -3288,6 +3323,11 @@ __LINKVIEW_SVG_HELPERS_JS__
         rect.dataset.variantId = meta.variant_id || '';
         rect.dataset.variantType = String(meta.type || '').toLowerCase();
         rect.dataset.markerIndex = String(index);
+        const rawType = String(meta.type || '').toUpperCase();
+        const fill = String(rect.getAttribute('fill') || '').toLowerCase();
+        const markerType = rawType ? (rawType === 'SNP' ? 'snp' : 'indel') : (fill === 'orange' ? 'snp' : 'indel');
+        rect.classList.toggle('variant-snp', markerType === 'snp');
+        rect.classList.toggle('variant-indel', markerType === 'indel');
       });
       [['.UTR3', 'utr3'], ['.UTR5', 'utr5'], ['.exon', 'cds']].forEach(([selector, type]) => {
         svg.querySelectorAll(selector).forEach(el => {
@@ -3300,17 +3340,12 @@ __LINKVIEW_SVG_HELPERS_JS__
       svg.querySelectorAll('.legend-item').forEach(item => {
         item.addEventListener('click', () => {
           const type = item.getAttribute('data-type');
-          item.classList.toggle('disabled');
-          const visible = !item.classList.contains('disabled');
-          let elements = [];
-          if (type === 'snp') elements = markerRects(svg, 'snp');
-          if (type === 'indel') elements = markerRects(svg, 'indel');
-          if (type === 'utr5') elements = Array.from(svg.querySelectorAll('.UTR5'));
-          if (type === 'utr3') elements = Array.from(svg.querySelectorAll('.UTR3'));
-          if (type === 'cds') elements = Array.from(svg.querySelectorAll('.exon'));
-          elements.forEach(el => { el.style.display = visible ? '' : 'none'; });
+          if (!type || !(type in state.legendVisibility)) return;
+          state.legendVisibility[type] = state.legendVisibility[type] === false;
+          applyLegendVisibilityToAll();
         });
       });
+      applyLegendVisibility(svg);
       [['snp', 'SNP'], ['indel', 'Indel']].forEach(([type, label]) => {
         markerRects(svg, type).forEach(rect => {
           rect.style.cursor = 'pointer';
