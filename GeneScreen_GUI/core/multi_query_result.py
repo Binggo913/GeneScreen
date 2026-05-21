@@ -16,7 +16,7 @@ import types
 from hashlib import md5
 from itertools import permutations, product
 from datetime import datetime
-from html import escape
+from html import escape, unescape
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -623,6 +623,93 @@ def _process_linkview_svg_file(svg_path: str) -> None:
         print(f"[WARNING] 处理 LINKVIEW SVG 失败: {exc}")
 
 
+def _normalize_track_token(value: Any) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _svg_text_records(svg: str) -> List[Tuple[float, str]]:
+    records: List[Tuple[float, str]] = []
+    for match in re.finditer(r"<text\b([^>]*)>(.*?)</text>", svg, flags=re.IGNORECASE | re.DOTALL):
+        attrs = match.group(1) or ""
+        body = re.sub(r"<[^>]+>", "", match.group(2) or "")
+        text = unescape(body).strip()
+        if not text:
+            continue
+        y_match = re.search(r'\by="([\-0-9.]+)"', attrs)
+        try:
+            y = float(y_match.group(1)) if y_match else 0.0
+        except ValueError:
+            y = 0.0
+        records.append((y, text))
+    return records
+
+
+def _parse_linkview_svg_order(
+    svg_path: str,
+    expected_order: List[str],
+    tracks: List[Dict[str, Any]],
+    track_aliases: Dict[str, str],
+) -> List[str]:
+    try:
+        with open(svg_path, "r", encoding="utf-8", errors="ignore") as handle:
+            svg = handle.read()
+    except OSError:
+        return expected_order
+
+    track_by_id = {str(track.get("track_id")): track for track in tracks}
+    candidates = expected_order + [
+        str(track.get("track_id")) for track in tracks
+        if str(track.get("track_id")) not in expected_order
+    ]
+    tokens_by_track: Dict[str, List[str]] = {}
+    for track_id in candidates:
+        track = track_by_id.get(track_id) or {}
+        tokens = [
+            track_id,
+            track_aliases.get(track_id),
+            track.get("name"),
+            track.get("sequence_id"),
+            track.get("genome_id"),
+        ]
+        tokens_by_track[track_id] = [
+            token for token in (_normalize_track_token(item) for item in tokens)
+            if token
+        ]
+
+    matched: List[Tuple[float, str]] = []
+    used = set()
+    for y, text in _svg_text_records(svg):
+        normalized = _normalize_track_token(text)
+        if not normalized:
+            continue
+        best_track = None
+        best_score = 0
+        tied = False
+        for track_id in candidates:
+            if track_id in used:
+                continue
+            score = 0
+            for token in tokens_by_track.get(track_id, []):
+                if normalized == token:
+                    score = max(score, 5)
+                elif len(token) >= 4 and token in normalized:
+                    score = max(score, 3)
+                elif len(normalized) >= 4 and normalized in token:
+                    score = max(score, 2)
+            if score > best_score:
+                best_track = track_id
+                best_score = score
+                tied = False
+            elif score and score == best_score:
+                tied = True
+        if best_track and not tied:
+            matched.append((y, best_track))
+            used.add(best_track)
+
+    inferred = [track_id for _, track_id in sorted(matched, key=lambda item: item[0])]
+    return inferred if len(inferred) == len(expected_order) else expected_order
+
+
 def _write_linkview_relation(
     handle,
     first_start: int,
@@ -799,6 +886,7 @@ def _generate_linkview_detail_assets(
     candidate_lists = [candidates_map[qid] for qid in query_order]
     svg_map: Dict[str, Dict[str, str]] = {}
     inline_svg_map: Dict[str, Dict[str, str]] = {}
+    order_map: Dict[str, Dict[str, List[str]]] = {}
     marker_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
     range_map: Dict[str, Dict[str, Dict[str, Any]]] = {}
     views = []
@@ -809,6 +897,7 @@ def _generate_linkview_detail_assets(
         combo_key = _selection_key(query_order, selected)
         svg_map.setdefault(combo_key, {})
         inline_svg_map.setdefault(combo_key, {})
+        order_map.setdefault(combo_key, {})
         marker_map.setdefault(combo_key, {})
         range_map[combo_key] = {
             "ref": {"start": 1, "end": max(1, ref_length), "label": ref_alias}
@@ -1030,6 +1119,7 @@ def _generate_linkview_detail_assets(
             if _run_linkview_for_report(input_file, prefix, k_file, hl_file, gff_file, identity, min_aln_len):
                 svg_path = f"{prefix}.svg"
                 _process_linkview_svg_file(svg_path)
+                order_map[combo_key][order_key] = _parse_linkview_svg_order(svg_path, order, tracks, track_aliases)
                 svg_map[combo_key][order_key] = relpath(svg_path, report_dir) or ""
                 try:
                     with open(svg_path, "r", encoding="utf-8", errors="ignore") as svg_handle:
@@ -1049,6 +1139,7 @@ def _generate_linkview_detail_assets(
     return {
         "linkview_svg_map": svg_map,
         "linkview_svg_inline_map": inline_svg_map,
+        "linkview_svg_order_map": order_map,
         "linkview_marker_map": marker_map,
         "linkview_views": views,
         "linkview_track_aliases": track_aliases,
@@ -2372,7 +2463,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       window.addEventListener('resize', () => {
         clearTimeout(resizeAlignTimer);
         resizeAlignTimer = setTimeout(() => {
-          const order = resolvedLinkviewOrder(state.order.length ? state.order.slice() : ['ref'].concat(queryIds()));
+          const assetOrder = resolvedLinkviewOrder(state.order.length ? state.order.slice() : ['ref'].concat(queryIds()));
+          const order = mappedLinkviewOrder(assetOrder);
           document.querySelectorAll('.detail-linkview-svg-root').forEach(svg => {
             ensureDetailGutter(svg, order);
             requestAnimationFrame(() => alignTrackControls(svg, order));
@@ -2613,8 +2705,13 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       renderDetail();
       syncOpenZoomModal();
     }
-    function nearestTrackControl(root, clientY) {
-      const rows = Array.from(root.querySelectorAll('.detail-track-control'));
+    function draggedTrackId(root) {
+      const dragging = root.querySelector('.detail-track-control.dragging') || document.querySelector('.detail-track-control.dragging');
+      return dragging ? dragging.dataset.trackId : '';
+    }
+    function nearestTrackControl(root, clientY, draggedId = '') {
+      const rows = Array.from(root.querySelectorAll('.detail-track-control'))
+        .filter(row => row.dataset.trackId && row.dataset.trackId !== draggedId && !row.classList.contains('dragging'));
       if (!rows.length) return null;
       return rows
         .map(row => {
@@ -2625,7 +2722,8 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         .sort((a, b) => a.distance - b.distance)[0];
     }
     function markNearestDrop(root, event) {
-      const nearest = nearestTrackControl(root, event.clientY);
+      const dragged = (event && event.dataTransfer && event.dataTransfer.getData('text/plain')) || draggedTrackId(root);
+      const nearest = nearestTrackControl(root, event.clientY, dragged);
       clearDropHints(root);
       if (!nearest) return null;
       nearest.row.classList.add(nearest.placement === 'after' ? 'drop-after' : 'drop-before');
@@ -2678,9 +2776,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         row.addEventListener('drop', e => {
           e.preventDefault();
           const dragged = e.dataTransfer.getData('text/plain');
-          const nearest = markNearestDrop(root, e) || { row, placement: 'before' };
+          const nearest = markNearestDrop(root, e);
           clearDropHints(root);
-          applyTrackDrop(dragged, nearest.row.dataset.trackId, nearest.placement);
+          if (nearest) applyTrackDrop(dragged, nearest.row.dataset.trackId, nearest.placement);
         });
         const select = row.querySelector('select');
         if (select) {
@@ -2734,6 +2832,12 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (defaultKey && selectedViews[defaultKey]) return defaultKey.split('||').filter(Boolean);
       const firstKey = Object.keys(selectedViews)[0];
       return firstKey ? firstKey.split('||').filter(Boolean) : order;
+    }
+    function mappedLinkviewOrder(assetOrder) {
+      const detail = reportData.detail || {};
+      const mappedViews = (detail.linkview_svg_order_map || {})[detailSelectionKey()] || {};
+      const mapped = mappedViews[detailOrderKey(assetOrder)];
+      return Array.isArray(mapped) && mapped.length ? mapped.slice() : assetOrder;
     }
     function resolveLinkviewSvg(order) {
       const detail = reportData.detail || {};
@@ -3045,28 +3149,29 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (!Number.isFinite(x1) || !Number.isFinite(x2) || Math.abs(x2 - x1) < 2) return;
       const left = Math.min(x1, x2);
       const right = Math.max(x1, x2);
-      const bracketY = y + height + 8;
-      const bracketHeight = 15;
+      const bracketY = y - 18;
+      const bracketHeight = 14;
       const curl = 10;
       const mid = (left + right) / 2;
       const d = (right - left) > curl * 4
-        ? `M ${left},${bracketY} Q ${left},${bracketY + bracketHeight} ${left + curl},${bracketY + bracketHeight} L ${mid - curl},${bracketY + bracketHeight} Q ${mid},${bracketY + bracketHeight} ${mid},${bracketY + bracketHeight + 6} Q ${mid},${bracketY + bracketHeight} ${mid + curl},${bracketY + bracketHeight} L ${right - curl},${bracketY + bracketHeight} Q ${right},${bracketY + bracketHeight} ${right},${bracketY}`
-        : `M ${left},${bracketY} Q ${mid},${bracketY + bracketHeight + 6} ${right},${bracketY}`;
+        ? `M ${left},${bracketY} Q ${left},${bracketY - bracketHeight} ${left + curl},${bracketY - bracketHeight} L ${mid - curl},${bracketY - bracketHeight} Q ${mid},${bracketY - bracketHeight} ${mid},${bracketY - bracketHeight - 6} Q ${mid},${bracketY - bracketHeight} ${mid + curl},${bracketY - bracketHeight} L ${right - curl},${bracketY - bracketHeight} Q ${right},${bracketY - bracketHeight} ${right},${bracketY}`
+        : `M ${left},${bracketY} Q ${mid},${bracketY - bracketHeight - 6} ${right},${bracketY}`;
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', d);
       path.setAttribute('class', 'detail-gene-bracket');
       svg.appendChild(path);
       const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
       label.setAttribute('x', mid);
-      label.setAttribute('y', bracketY + bracketHeight + 20);
+      label.setAttribute('y', bracketY - bracketHeight - 10);
       label.setAttribute('text-anchor', 'middle');
       label.setAttribute('class', 'detail-gene-label');
       label.textContent = input.id;
       svg.appendChild(label);
     }
-    function enhanceLinkviewSvg(svg, order, tooltip) {
+    function enhanceLinkviewSvg(svg, assetOrder, tooltip) {
       if (!svg) return;
-      const effectiveOrder = inferSvgTrackOrder(svg, order);
+      const mappedOrder = mappedLinkviewOrder(assetOrder);
+      const effectiveOrder = inferSvgTrackOrder(svg, mappedOrder);
       syncTrackOverlay(svg, effectiveOrder);
       svg.classList.add('detail-linkview-svg-root');
       svg.setAttribute('width', '100%');
@@ -3099,7 +3204,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
         ensureDetailGutter(svg, effectiveOrder);
         requestAnimationFrame(() => alignTrackControls(svg, effectiveOrder));
       });
-      const markers = resolveLinkviewMarkers(effectiveOrder);
+      const markers = resolveLinkviewMarkers(assetOrder);
       allMarkerRects(svg).forEach((rect, index) => {
         const meta = markers[index] || {};
         rect.dataset.variantId = meta.variant_id || '';
@@ -3149,15 +3254,16 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const body = document.getElementById('zoom-modal-body');
       if (!modal || !body) return false;
       const requestedOrder = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
-      const order = resolvedLinkviewOrder(requestedOrder);
+      const assetOrder = resolvedLinkviewOrder(requestedOrder);
+      const displayOrder = mappedLinkviewOrder(assetOrder);
       const detail = reportData.detail || {};
       const layout = detail.linkview_layout || { svg_height: 400, top_margin: 90 };
       const svgHeight = Number(layout.svg_height || 400);
       const topMargin = Number(layout.top_margin || 0);
-      const inlineSvg = resolveLinkviewInlineSvg(order);
+      const inlineSvg = resolveLinkviewInlineSvg(assetOrder);
       const currentSvg = document.querySelector('#detail .detail-linkview-svg svg');
       if (!inlineSvg && !currentSvg) return false;
-      body.innerHTML = `<div class="detail-canvas zoom-detail-canvas"><div id="modal-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg"></div><div class="detail-track-overlays">${makeTrackControls(order, svgHeight, topMargin)}</div></div>`;
+      body.innerHTML = `<div class="detail-canvas zoom-detail-canvas"><div id="modal-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg"></div><div class="detail-track-overlays">${makeTrackControls(displayOrder, svgHeight, topMargin)}</div></div>`;
       const host = body.querySelector('.detail-linkview-svg');
       if (inlineSvg) {
         host.innerHTML = inlineSvg;
@@ -3170,7 +3276,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       if (!svg) return false;
       svg.style.width = '100%';
       svg.style.minWidth = '1200px';
-      enhanceLinkviewSvg(svg, order, body.querySelector('#modal-tooltip'));
+      enhanceLinkviewSvg(svg, assetOrder, body.querySelector('#modal-tooltip'));
       wireDetailTrackControls(body);
       return true;
     }
@@ -3190,8 +3296,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     function renderLinkviewDetail() {
       const root = document.getElementById('detail');
       const requestedOrder = state.order.length ? state.order.slice() : ['ref'].concat(queryIds());
-      const order = resolvedLinkviewOrder(requestedOrder);
-      const svgPath = resolveLinkviewSvg(order);
+      const assetOrder = resolvedLinkviewOrder(requestedOrder);
+      const displayOrder = mappedLinkviewOrder(assetOrder);
+      const svgPath = resolveLinkviewSvg(assetOrder);
       if (!svgPath) {
         renderVectorDetail();
         return;
@@ -3201,7 +3308,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const svgHeight = Number(layout.svg_height || 400);
       const topMargin = Number(layout.top_margin || 0);
       const token = ++detailRenderToken;
-      root.innerHTML = `<div class="detail-canvas"><div id="svg-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg">Loading...</div><div class="detail-track-overlays">${makeTrackControls(order, svgHeight, topMargin)}</div><button id="zoom-btn" class="zoom-btn" title="Zoom"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path><path d="M11 8v6M8 11h6"></path></svg></button></div>`;
+      root.innerHTML = `<div class="detail-canvas"><div id="svg-tooltip" class="svg-tooltip"></div><div class="detail-linkview-svg">Loading...</div><div class="detail-track-overlays">${makeTrackControls(displayOrder, svgHeight, topMargin)}</div><button id="zoom-btn" class="zoom-btn" title="Zoom"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><path d="M21 21l-4.35-4.35"></path><path d="M11 8v6M8 11h6"></path></svg></button></div>`;
       wireDetailTrackControls();
       const zoomBtn = document.getElementById('zoom-btn');
       if (zoomBtn) zoomBtn.onclick = openZoomModal;
@@ -3209,11 +3316,11 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       const closeBtn = document.getElementById('zoom-modal-close');
       if (closeBtn) closeBtn.onclick = closeZoomModal;
       if (modal) modal.onclick = event => { if (event.target === modal) closeZoomModal(); };
-      const inlineSvg = resolveLinkviewInlineSvg(order);
+      const inlineSvg = resolveLinkviewInlineSvg(assetOrder);
       if (inlineSvg) {
         const host = root.querySelector('.detail-linkview-svg');
         host.innerHTML = inlineSvg;
-        enhanceLinkviewSvg(host.querySelector('svg'), order, root.querySelector('#svg-tooltip'));
+        enhanceLinkviewSvg(host.querySelector('svg'), assetOrder, root.querySelector('#svg-tooltip'));
         return;
       }
       fetch(svgPath)
@@ -3222,7 +3329,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
           if (token !== detailRenderToken) return;
           const host = root.querySelector('.detail-linkview-svg');
           host.innerHTML = svgText;
-          enhanceLinkviewSvg(host.querySelector('svg'), order, root.querySelector('#svg-tooltip'));
+          enhanceLinkviewSvg(host.querySelector('svg'), assetOrder, root.querySelector('#svg-tooltip'));
         })
         .catch(() => {
           if (token !== detailRenderToken) return;
