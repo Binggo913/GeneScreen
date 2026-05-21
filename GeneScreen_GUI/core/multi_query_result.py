@@ -57,6 +57,27 @@ def relpath(path: Optional[str], start: str) -> Optional[str]:
         return str(path).replace(os.sep, "/")
 
 
+def report_file_entry(label: str, path: Optional[str], description: str, report_dir: str) -> Optional[Dict[str, Any]]:
+    if not path:
+        return None
+    return {
+        "label": label,
+        "href": relpath(path, report_dir),
+        "path": os.path.abspath(path),
+        "description": description,
+        "exists": os.path.exists(path),
+    }
+
+
+def is_report_data_json_entry(entry: Optional[Dict[str, Any]]) -> bool:
+    if not entry:
+        return False
+    label = str(entry.get("label") or "")
+    path = str(entry.get("path") or "").replace("\\", "/")
+    href = str(entry.get("href") or "").replace("\\", "/")
+    return label == "data.json" or path.endswith("/data.json") or href.endswith("/data.json")
+
+
 def report_candidate_limit(result: Dict[str, Any]) -> Optional[int]:
     if bool(result.get("pairwise_all", False)):
         return None
@@ -1277,11 +1298,9 @@ def build_multi_query_payload(
         selected_candidate = candidates[0] if candidates else None
         pair_legacy_report = legacy_report_for(index, query_safe)
         if pair_legacy_report:
-            legacy_extra_files.append({
-                "label": os.path.basename(pair_legacy_report),
-                "path": relpath(pair_legacy_report, report_dir),
-                "description": f"旧版单报告：{ref_entry_name} vs {query_name}",
-            })
+            legacy_entry = report_file_entry(os.path.basename(pair_legacy_report), pair_legacy_report, "单报告", report_dir)
+            if legacy_entry:
+                legacy_extra_files.append(legacy_entry)
 
         query_order.append(query_safe)
         selected_candidates[query_safe] = selected_candidate["candidate_id"] if selected_candidate else None
@@ -1471,9 +1490,11 @@ def build_multi_query_payload(
             },
         },
         "extra_files": legacy_extra_files + [
-            {"label": label, "path": relpath(path, report_dir), "description": desc}
-            for label, path, desc in extra_files
-            if path
+            entry for entry in (
+                report_file_entry(label, path, desc, report_dir)
+                for label, path, desc in extra_files
+            )
+            if entry and not is_report_data_json_entry(entry)
         ],
     }
 
@@ -1693,9 +1714,11 @@ def build_single_query_payload(
             },
         },
         "extra_files": [
-            {"label": label, "path": relpath(path, report_dir), "description": desc}
-            for label, path, desc in extra_files
-            if path
+            entry for entry in (
+                report_file_entry(label, path, desc, report_dir)
+                for label, path, desc in extra_files
+            )
+            if entry and not is_report_data_json_entry(entry)
         ],
     }
     return payload
@@ -1869,6 +1892,9 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
     .file-table { width: 100%; border-collapse: collapse; }
     .file-table th, .file-table td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #eee; vertical-align: top; }
     .file-table th { background: #f9f9f9; font-weight: 600; color: #666; }
+    .file-name-link { color: #667eea; text-decoration: none; font-weight: 600; }
+    .file-name-link:hover { text-decoration: underline; }
+    .path-cell { max-width: 560px; }
     .path-code {
       font-size: 11px;
       color: #666;
@@ -1877,6 +1903,7 @@ def _render_multi_query_report_html(payload: Dict[str, Any]) -> str:
       padding: 2px 6px;
       border-radius: 3px;
     }
+    .path-clickable { cursor: pointer; }
     .file-na { color: #999; font-size: 12px; }
     .visualization-section { background: #fafafa; }
     .viz-container {
@@ -3484,11 +3511,33 @@ __LINKVIEW_SVG_HELPERS_JS__
     }
     function renderOutputs() {
       const rows = [`<tr><th>${t('filename')}</th><th>${t('description')}</th><th>${t('path')}</th></tr>`];
-      rows.push(`<tr><td><a href="data.json">data.json</a></td><td>${t('structuredData')}</td><td><code class="path-code">report/data.json</code></td></tr>`);
       for (const f of reportData.extra_files || []) {
-        rows.push(`<tr><td>${esc(f.label || '-')}</td><td>${esc(f.description || '')}</td><td><code class="path-code">${esc(f.path || '')}</code></td></tr>`);
+        const label = String(f.label || '-');
+        const normalizedPath = String(f.path || '').replace(/\\/g, '/');
+        if (label === 'data.json' || normalizedPath.endsWith('/data.json')) continue;
+        const href = f.href || f.path || '';
+        const path = f.path || href || '';
+        const description = String(f.description || '').startsWith('旧版单报告') ? '单报告' : (f.description || '');
+        const nameCell = href
+          ? `<a href="${esc(href)}" class="file-name-link" title="${esc(path)}">${esc(label)}</a>`
+          : `<span class="file-name-disabled">${esc(label)}</span>`;
+        rows.push(`<tr><td>${nameCell}</td><td>${esc(description)}</td><td class="path-cell"><code class="path-code path-clickable" data-path="${esc(path)}" onclick="copyToClipboard(this.dataset.path)" title="${esc(path)}">${esc(path)}</code></td></tr>`);
       }
       document.getElementById('outputTable').innerHTML = rows.join('');
+    }
+    function copyToClipboard(text) {
+      const toast = document.getElementById('copyToast');
+      const showCopied = () => {
+        if (!toast) return;
+        toast.textContent = currentLang === 'en' ? 'Copied to clipboard' : '已复制到剪贴板';
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(showCopied).catch(showCopied);
+      } else {
+        showCopied();
+      }
     }
   </script>
 </body>
