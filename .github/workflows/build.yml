@@ -68,6 +68,11 @@ jobs:
         if: matrix.platform == 'macos'
         run: brew install create-dmg
 
+      - name: Install Windows setup packaging dependency
+        if: matrix.platform == 'windows'
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
       - name: Build with Nuitka
         working-directory: GeneScreen_GUI
         run: python build.py
@@ -86,6 +91,12 @@ jobs:
           New-Item -ItemType Directory -Force -Path $PackageDir | Out-Null
           Copy-Item -Path (Join-Path $SourceDir.FullName "*") -Destination $PackageDir -Recurse -Force
           Compress-Archive -Path $PackageDir -DestinationPath "dist/packages/$PackageName.zip" -Force
+          ./build_installer.ps1 `
+            -SourceDir $SourceDir.FullName `
+            -OutputDir (Resolve-Path "dist/packages").Path `
+            -AppVersion "${{ needs.metadata.outputs.version }}" `
+            -Arch "${{ matrix.arch }}" `
+            -Timestamp "${{ needs.metadata.outputs.timestamp }}"
 
       - name: Package macOS build
         if: matrix.platform == 'macos'
