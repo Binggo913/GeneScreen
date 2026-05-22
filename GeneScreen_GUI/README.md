@@ -120,6 +120,12 @@ python main.py
 ```bash
 # 本地仅执行 Nuitka 构建；正式四架构产物由 GitHub Actions 生成
 python build.py
+
+# Windows 宿主机已安装 Inno Setup 时，可在 Nuitka 构建后生成 setup 安装包
+powershell -ExecutionPolicy Bypass -File .\build_installer.ps1 -Arch x64
+
+# 如果 Inno Setup 不在默认路径，可传入 ISCC.exe 或 Inno Setup Compiler.lnk
+powershell -ExecutionPolicy Bypass -File .\build_installer.ps1 -Arch win-x86 -IsccPath "C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Inno Setup 6\Inno Setup Compiler.lnk"
 ```
 
 ## 系统要求
