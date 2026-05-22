@@ -13,6 +13,8 @@ venv/
 .venv/
 env/
 .conda/
+.venv-win*/
+GeneScreen_GUI/.venv-win*/
 
 # ========== 本地数据（大文件不进仓库） ==========
 GenomesDB/
@@ -23,6 +25,8 @@ test_sequences.fa
 build/
 dist/
 *.spec
+GeneScreen_GUI/build/
+GeneScreen_GUI/dist/
 
 # ========== 测试输出 ==========
 **/test_output/
